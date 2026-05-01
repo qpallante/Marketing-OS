@@ -6,6 +6,55 @@ Entry in ordine cronologico inverso (più recenti in alto). Aggiornamento manual
 
 ---
 
+## 2026-05-01 — Sessione 3: Authentication, JWT, multi-tenant middleware
+
+**Stato**: chiusa. 3 commit su `origin/main`: `feat(auth): …`, `docs(adr): ADR-0003`, `docs(journal): …`. (Sessione 3-bis copre i test pytest formali in `core-api/tests/`, deferred.)
+
+### Cosa è stato fatto
+- `app/core/security.py`: bcrypt + JWT (HS256) con `TokenType` enum, `_encode_token`, `decode_access_token` / `decode_refresh_token`, `hash_password` / `verify_password`. Mapping pulito di `ExpiredSignatureError` / `JWTError` a messaggi non-leak.
+- `app/db/session.py`: split in `get_unauthenticated_db` (RLS bypass per /login + /refresh) e `get_authenticated_db(user)` che applica contratto ADR-0002 (`SET LOCAL ROLE authenticated` + `set_config` GUC vars + DEBUG log strutturato).
+- `app/core/middleware.py`: `JWTAuthMiddleware` ASGI puro (no `BaseHTTPMiddleware`). Estrae Bearer header, decode, popola `request.state.token_payload`. 401 immediata su token invalido. Path esclusi: `/health`, `/docs*`, `/redoc`, `/openapi.json`.
+- `app/core/deps.py`: `get_token_payload`, `get_current_user` (con OPTION A strict checks), `get_authenticated_session`, `require_super_admin`, `require_client_admin`. Helper `_reject` con `NoReturn` + structlog warning + `from None`.
+- `app/routers/auth.py`: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`, `GET /api/v1/auth/me`. Schemi pydantic inline (`LoginRequest`, `LoginResponse`, `RefreshRequest`, `MeResponse`, `ClientSummary`). `EmailStr` su login; case-insensitive lookup. Login fail uniforme `"invalid credentials"`. Refresh stateless con rotation. `/me` usa `get_authenticated_session` per esercitare RLS end-to-end.
+- `app/main.py`: middleware mounted, router included con `prefix="/api/v1/auth"`, `_custom_openapi()` registra `BearerAuth` scheme globale.
+- ADR-0003 documenta tutte le scelte (HS256, claims, stateless refresh + exit strategy `tv`, lifetimes per ambiente, type discriminator, no rate limit per ora, no password validation al login, OPTION A strict checks, login response uniforme).
+- `scripts/seed_dev.py` aggiornato a email `.example` (passa EmailStr). Vecchi user `.local` cancellati, ri-seedati.
+- 16/16 inline test pass (login OK / wrong creds / disabled / case-insensitive / /me ruolo + null per super_admin / no token / refresh rotation / token type discriminator / E2E flow / RLS scope / OpenAPI security per-endpoint).
+
+### Frizioni reali
+1. **`scope["state"]` può essere dict in Starlette recente.** Il primo run del middleware è andato in `AttributeError: 'dict' object has no attribute 'token_payload'`. Causa: Starlette propaga lifespan state come dict in `scope["state"]`, anche se la lifespan del nostro app non ritorna nulla. Fix: detect type e wrap con `State(existing_dict)` se dict, lasciando il dict come storage backing per non rompere altri consumer.
+2. **`EmailStr` ↔ seed con TLD reservati.** Trap a due livelli: (a) seed iniziale con `@*.local` rifiutato da `email-validator` con "special-use or reserved name". Switch a `@*.test` (RFC 2606 testing) — ma anche `.test` viene rifiutato da `email-validator` (lo include nella lista special-use). Switch finale a `@*.example` (RFC 2606 documentation) che invece passa. Ricicli del seed × 2.
+3. **`jose.encode()` ritorna `Any` in mypy strict.** `disallow_any_generics + warn_return_any` flaggava `return jwt.encode(...)`. Fix con annotazione locale esplicita `encoded: str = jwt.encode(...); return encoded`. Pattern da ricordare per altre lib senza type stubs (jose, vecchie SDK).
+4. **`pydantic.EmailStr` richiede `email-validator` separatamente.** Non è una dep transitiva di pydantic (è opzionale). Aggiunto via `poetry add email-validator`. Marginale ma scoperto solo a runtime durante il primo /login.
+
+### Decisioni rilevanti
+Tutte tracciate in [ADR-0003](./infrastructure/docs/architecture/decisions/0003-jwt-authentication-strategy.md). Punti critici:
+
+- **OPTION A strict checks** (token role/client_id vs DB) — mismatch forza re-login, costa zero query extra (user già loaded).
+- **Login response uniforme** `"invalid credentials"` su tutti i casi di fallimento — anti user-enumeration. Il log WARNING usa SHA-256 dell'email (no plaintext, GDPR).
+- **Refresh stateless** con rotation. Vecchio refresh resta tecnicamente valido fino a expiry. Exit strategy: claim `tv` (token_version) sull'utente, bump invalida tutto. Sessione 5/6.
+- **Lifetimes env-tunable**: 60min access (sempre), 7d refresh dev / 30d refresh prod. Refresh corto in dev = scoprire rotture early.
+- **No rate limiting per ora** — Redis arriva in Sessione 5+. TODO tracciato.
+
+### Lezioni apprese
+- **ASGI middleware: `scope["state"]` può essere dict.** Mai `setdefault("state", State())` ciecamente — `setdefault` ritorna l'esistente, che potrebbe essere dict. Detect type prima di fare attribute access.
+- **`email-validator` (via pydantic.EmailStr) rifiuta TLD special-use (RFC 6761).** `.local`, `.test`, `.localhost` sono fuori. `.example` è in. Per fake-domain in seed/test usare `.example` (RFC 2606 reserved per documentation).
+- **mypy strict + lib senza stubs**: `var: Type = lib_call(...)` è il modo idiomatico. Più leggibile di `cast(Type, lib_call(...))` e meno ipotecante di `# type: ignore`.
+- **Login uniformity richiede attenzione**. È facile sbagliare e leakare info via timing o detail-string differenti. Il check uniforme `not user or not user.is_active or not verify_password(...)` in un solo `if` è più robusto di tre `if` separati con stessi `raise`.
+
+### Da ricordare
+- Credenziali seed dev (DEV ONLY): `admin@marketing-os.example` / `admin@monoloco.example` — password salvate localmente nel password manager dell'utente.
+- Email-validator: `.example` ✓, `.test` ✗, `.local` ✗.
+- Per la Sessione 3-bis (test pytest formali) i test inline scritti durante S3 sono buoni reference da convertire in fixture pytest.
+- Quando in Sessione 4 aggiungeremo CORS middleware: deve stare PRIMA (più esterno) di `JWTAuthMiddleware` per gestire preflight OPTIONS senza attraversare l'auth.
+- Quando in S5+ aggiungeremo Redis: rate limiting su `/api/v1/auth/login` (5/15min/IP) — vedi TODO.md.
+
+### Prossimo
+- **Sessione 3-bis**: pytest formali in `core-api/tests/{conftest.py, test_auth.py}` per coprire il login flow, refresh rotation, isolation cross-tenant via API. Convertire i 16 inline test di Sessione 3 in fixture e test pytest.
+- **Sessione 4** (originale): Frontend dashboard — login + struttura base. Login form con i nuovi endpoint `/api/v1/auth/*`, JWT in httpOnly cookie via Next.js API route, layout con sidebar.
+
+---
+
 ## 2026-05-01 — Sessione 1: Bootstrap monorepo
 
 **Stato**: chiusa. 3 commit su `origin/main` (`afab0ae`, `013e81a`, `13f275a`).
