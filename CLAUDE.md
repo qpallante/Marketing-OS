@@ -58,6 +58,8 @@ Row-level security su Supabase per ogni tabella. Audit log su ogni accesso a dat
 - **Job queue:** Celery + Redis
 - **Frontend:** Next.js 16+ (App Router) + TypeScript + React 19
 - **UI:** Tailwind CSS v4 (CSS-first config) + shadcn/ui
+
+> **Next.js 16+ breaking change** (importante per chi cerca pattern online): il vecchio `middleware.ts` (Next.js ≤15) è stato rinominato `proxy.ts` (Next.js 16+). La funzione esportata è `proxy()` invece di `middleware()`. Il file va in `src/proxy.ts` (con `src/` layout) o root del progetto Next.js (senza `src/`). Vedere `web-dashboard/src/proxy.ts` come reference. **Sempre verificare la docs della major version installata** via `web-dashboard/node_modules/next/dist/docs/` prima di copiare pattern dal web — molti tutorial fanno riferimento a versioni obsolete.
 - **Auth:** Supabase Auth con JWT
 - **Storage:** Supabase Storage + Backblaze B2 per media (S3-compatible)
 - **Realtime:** Supabase Realtime

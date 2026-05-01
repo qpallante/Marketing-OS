@@ -82,4 +82,5 @@ Link a documenti, RFC, benchmark, conversazioni Slack/issue rilevanti.
 |----|--------|--------|
 | [0001](./0001-stack-tecnologico-iniziale.md) | Stack tecnologico iniziale | Accepted |
 | [0002](./0002-rls-strategy.md) | RLS Strategy: per-session settings con `current_setting` | Accepted |
-| [0003](./0003-jwt-authentication-strategy.md) | JWT authentication strategy | Accepted |
+| [0003](./0003-jwt-authentication-strategy.md) | JWT authentication strategy (backend) | Accepted |
+| [0004](./0004-frontend-auth-strategy.md) | Frontend authentication strategy (Next.js BFF) | Accepted |
