@@ -31,10 +31,10 @@ def _hash_password(plain: str) -> str:
     """bcrypt hash — direct API to avoid passlib<>bcrypt 4.x incompat."""
     return bcrypt.hashpw(plain.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-SUPER_ADMIN_EMAIL = "admin@marketing-os.local"
+SUPER_ADMIN_EMAIL = "admin@marketing-os.example"
 MONOLOCO_SLUG = "monoloco"
 MONOLOCO_NAME = "Monoloco"
-MONOLOCO_ADMIN_EMAIL = "admin@monoloco.local"
+MONOLOCO_ADMIN_EMAIL = "admin@monoloco.example"
 
 
 async def _ensure_super_admin(session: AsyncSession) -> tuple[User, str | None]:

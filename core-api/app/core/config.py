@@ -30,7 +30,10 @@ class Settings(BaseSettings):
     )
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
-    jwt_refresh_token_expire_days: int = 30
+    refresh_token_ttl_days: int = 7
+    """Refresh token TTL in giorni. Default 7 in dev/staging (rotture scoperte
+    presto). Override a 30 in production via env REFRESH_TOKEN_TTL_DAYS=30.
+    Vedi ADR-0003."""
 
     anthropic_api_key: str = ""
     openai_api_key: str = ""
