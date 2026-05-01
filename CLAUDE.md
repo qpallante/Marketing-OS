@@ -300,7 +300,7 @@ Per evitare di costruire complessità inutile:
 **Repo:** [github.com/qpallante/Marketing-OS](https://github.com/qpallante/Marketing-OS)
 
 **Cosa è stato costruito:**
-- **Sessione 1 — Bootstrap monorepo** (commit `6098547`, chiusa il 2026-05-01): struttura repo (`core-api/`, `web-dashboard/`, `pipelines/`, `infrastructure/`); `core-api` con Python 3.12 + Poetry + FastAPI 0.136 + SQLAlchemy 2.0 async + Alembic + Anthropic/OpenAI SDK + structlog (ruff/mypy strict puliti, `/health` operativo); `web-dashboard` con Next.js 16.2 + React 19 + Tailwind v4 + shadcn/ui (preset `base-nova`, neutral) + ESLint 9 + Prettier (build/lint/typecheck verdi); ADR-0001 in `infrastructure/docs/architecture/decisions/`; connessione a Supabase (progetto `txmkxllfhzrfetordkap`, pooler `eu-west-1` session mode, Postgres 17.6) verificata.
+- **Sessione 1 — Bootstrap monorepo** (commit `afab0ae`, chiusa il 2026-05-01): struttura repo (`core-api/`, `web-dashboard/`, `pipelines/`, `infrastructure/`); `core-api` con Python 3.12 + Poetry + FastAPI 0.136 + SQLAlchemy 2.0 async + Alembic + Anthropic/OpenAI SDK + structlog (ruff/mypy strict puliti, `/health` operativo); `web-dashboard` con Next.js 16.2 + React 19 + Tailwind v4 + shadcn/ui (preset `base-nova`, neutral) + ESLint 9 + Prettier (build/lint/typecheck verdi); ADR-0001 in `infrastructure/docs/architecture/decisions/`; connessione a Supabase (progetto `txmkxllfhzrfetordkap`, pooler `eu-west-1` session mode, Postgres 17.6) verificata.
 
 **Prossima milestone:** Schema multi-tenant operativo con RLS attive, primo seed Monoloco (fine Sessione 2).
 
