@@ -2,7 +2,7 @@
 
 Diario operativo del progetto. Tono asciutto, onesto. Riporta come si è arrivati alle decisioni, le frizioni reali, ciò che vale ricordare a 6 mesi di distanza. Non duplica codice, ADR o CLAUDE.md.
 
-Entry in ordine cronologico inverso (più recenti in alto). Le entry future vengono aggiunte da un agent automatico giornaliero (vedi sezione *Automazione* in fondo).
+Entry in ordine cronologico inverso (più recenti in alto). Aggiornamento manuale, vedi sezione *Workflow* in fondo.
 
 ---
 
@@ -57,12 +57,11 @@ Entry in ordine cronologico inverso (più recenti in alto). Le entry future veng
 
 ---
 
-## Automazione
+## Workflow
 
-Le entry future del journal sono pensate per essere aggiunte da un agent giornaliero schedulato (via `/schedule`). Setup pendente — da configurare con scope da concordare:
+Aggiornamento manuale, su richiesta esplicita a Claude Code a fine sessione.
 
-- **Cosa fa l'agent ogni giorno**: legge la git history dall'ultima entry, somma una nuova entry datata con (a) commit del giorno, (b) update di "Prossimo step" in base al `07_Prompt_Claude_Code.md` o ai TODO emersi, (c) eventuali decisioni/problemi non ancora documentati.
-- **Cadenza**: da decidere (giornaliero a fine giornata? settimanale lunedì?).
-- **Skip se nessuna attività**: se zero commit nel periodo, l'agent non aggiunge entry vuote (preferibile a un journal pieno di "TBD").
-
-Quando lo scope è confermato, l'agent viene attivato; finché non lo è, le entry future sono aggiunte manualmente nelle sessioni di lavoro.
+- **Quando**: alla chiusura di una sessione di lavoro (dopo commit + push), Quintino chiede a Claude Code di aggiungere l'entry per quella sessione.
+- **Cosa includere**: data + titolo sessione, commit principali, problemi incontrati, lezioni apprese, decisioni rilevanti, "Da ricordare", "Prossimo".
+- **Cosa non includere**: dettagli derivabili dal codice o da git log; ripetizioni di ADR/CLAUDE.md.
+- **Niente automazione**: nessun agent schedulato. Il valore di questo file dipende dal commento umano sui passaggi non ovvi — l'agent autonomo finirebbe a riassumere git log, che è già consultabile.
