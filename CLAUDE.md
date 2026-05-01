@@ -294,15 +294,16 @@ Per evitare di costruire complessità inutile:
 
 ## Stato attuale del progetto
 
-**Versione:** v0.0.1 (pre-alpha)
+**Versione:** v0.0.2 (pre-alpha)
 **Fase corrente:** Fase 1 — Fondamenta (Mesi 1-3)
-**Sprint corrente:** Settimana 2 — Setup Supabase e onboarding Monoloco
+**Sprint corrente:** Settimana 3 — Authentication, JWT, multi-tenant middleware
 **Repo:** [github.com/qpallante/Marketing-OS](https://github.com/qpallante/Marketing-OS)
 
 **Cosa è stato costruito:**
 - **Sessione 1 — Bootstrap monorepo** (commit `afab0ae`, chiusa il 2026-05-01): struttura repo (`core-api/`, `web-dashboard/`, `pipelines/`, `infrastructure/`); `core-api` con Python 3.12 + Poetry + FastAPI 0.136 + SQLAlchemy 2.0 async + Alembic + Anthropic/OpenAI SDK + structlog (ruff/mypy strict puliti, `/health` operativo); `web-dashboard` con Next.js 16.2 + React 19 + Tailwind v4 + shadcn/ui (preset `base-nova`, neutral) + ESLint 9 + Prettier (build/lint/typecheck verdi); ADR-0001 in `infrastructure/docs/architecture/decisions/`; connessione a Supabase (progetto `txmkxllfhzrfetordkap`, pooler `eu-west-1` session mode, Postgres 17.6) verificata.
+- **Sessione 2 — Schema multi-tenant + RLS** (commit `b5a18c2` schema, `d5763ad` RLS, chiusa il 2026-05-01): 4 tabelle (`clients`, `users`, `platform_accounts`, `audit_log`) con 4 enum tipizzati, trigger `set_updated_at`, `audit_log` append-only by design; 5 file RLS in `supabase/policies/` (helpers + per-tabella) con pattern `current_setting('app.current_client_id')` + `current_setting('app.is_super_admin')`; smoke test ✅ tutti verdi inclusa verifica fail-closed (0 righe senza `SET LOCAL`); seed Monoloco creato in DB (super_admin + client_admin). **ADR-0002** documenta il contratto del middleware: ogni transazione autenticata DEVE eseguire `SET LOCAL ROLE authenticated` prima di settare le variabili — il role `postgres` è SUPERUSER e bypassa RLS automaticamente.
 
-**Prossima milestone:** Schema multi-tenant operativo con RLS attive, primo seed Monoloco (fine Sessione 2).
+**Prossima milestone:** Auth flow completo + middleware multi-tenant che applica contratto ADR-0002 (fine Sessione 3).
 
 ---
 
