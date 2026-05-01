@@ -6,6 +6,48 @@ Entry in ordine cronologico inverso (più recenti in alto). Aggiornamento manual
 
 ---
 
+## 2026-05-01 — Sessione 4-bis: Refresh token auto-rotation
+
+**Stato**: chiusa. 3 commit su `origin/main`: feat(auth-frontend), docs(adr) ADR-0005, docs(journal) S4-bis.
+
+### Cosa è stato fatto
+- **`app/api/auth/rotate/route.ts`** (NEW): Route Handler GET che tenta rotation. Sanitize `?to=`, read refresh_token cookie (assente → cleanup), POST `/api/v1/auth/refresh`, success → `cookies.set(access, refresh)` con stesse opzioni di `loginAction` + redirect(to), failure (4xx/5xx/network/parse) → `/api/auth/clear?to=/login`. Logging strutturato `console.info`/`console.warn` con `{action, success, reason?, to_path}`.
+- **`(dashboard)/layout.tsx`** (MOD): catch `AuthRequiredError` ora redirige a `/api/auth/rotate?to=<encoded>` invece di `/api/auth/clear`. Helper `getCurrentPathname()` legge `x-pathname` + `x-search` headers (workaround Server Components no `usePathname`). Log `auth_rotation_triggered` con `from_path` prima del redirect.
+- **`src/proxy.ts`** (MOD): propaga `x-pathname` + `x-search` headers su tutte le request passthrough via `NextResponse.next({ request: { headers } })`. Permette ai Server Components di ricostruire l'URL corrente con query string.
+- **ADR-0005**: documenta PATH B vs PATH A, pattern `/api/auth/*` family, lessons learned (Trap Next.js 16 #2: Server Components no cookies().set()).
+
+### Frizioni reali
+1. **Trap Next.js 16 #2 — Server Components NON possono mutare cookies**. Scoperto leggendo i docs ufficiali (`cookies.md` §"Cookie Behavior in Server Components") **PRIMA** di scrivere il codice. Citazione testuale: "Setting cookies is not supported during Server Component rendering. To modify cookies, invoke a Server Function from the client or use a Route Handler. HTTP does not allow setting cookies after streaming starts." Il piano iniziale PATH A (rotation in-place dentro `backendFetch`) sarebbe fallito silenziosamente sui Server Components — il `cookies().set()` avrebbe lanciato eccezione, il replay con nuovo token in Authorization header avrebbe avuto successo per la singola request, ma i cookie del browser sarebbero rimasti col vecchio access scaduto → 3 round-trip permanenti su ogni page load post-expiry. Pivot a PATH B (Route Handler `/api/auth/rotate` centralizzato) che funziona ovunque e semplifica il codice (no mutex / replay / retry budget).
+2. **Query string preservation richiede header dedicato `x-search`**. Inizialmente proxy propagava solo `x-pathname` (path puro). Test 10 (utente su `/settings?tab=integrations`) avrebbe perso la query: redirect a `/settings` invece di `/settings?tab=integrations`. Aggiunto `x-search` header separato, layout combina i due. Pulizia semantica > unificare in un solo header chiamato comunque "pathname".
+3. **Helper `nextWithPathname()` da usare ovunque il proxy fa next()**, anche per path non protetti. Inizialmente lo aggiungevo solo al passthrough con cookie. Ma /login e altri Server Components non protetti potrebbero un domani volerlo. Costo zero, applicato universalmente con doc inline.
+4. **Logging structured con livelli (info success / warn failure)**. Il pattern usato finora era sempre `console.info` con campo `success` nel payload. Spec esplicitamente WARN per failures → upgrade a `console.warn` con due helper separati (`logSuccess`/`logFailure`). Permette filtro per livello quando aggiungeremo aggregator (S5+).
+
+### Decisioni rilevanti
+Tutte tracciate in [ADR-0005](./infrastructure/docs/architecture/decisions/0005-refresh-token-auto-rotation.md). Punti critici:
+- **PATH B over PATH A** per il vincolo Server Component cookie writes.
+- **Pattern famiglia `/api/auth/*`** per tutte le cookie operations: clear (S3-bis), rotate (S4-bis), futuri password-reset/email-verification (S5+).
+- **No mutex/replay/retry budget**: il browser serializza naturalmente la redirect chain. Test 7 (4 rotation parallele in race) conferma: 4 redirect, no errori, no loop.
+- **`x-pathname` + `x-search` proxy headers** come workaround per Server Components senza `usePathname/useSearchParams`.
+
+### Lezioni apprese
+- **Validate runtime constraints PRIMA del piano, non solo naming conventions**. ADR-0004 catturava il primo trap Next.js 16 (middleware → proxy rename). Questo è il secondo. Il pattern emerso si consolida: prima di proporre architecture decisions su frontend Next.js, leggere `node_modules/next/dist/docs/` per la versione installata. Non solo "che file si chiama come" ma anche "cosa posso fare in quale contesto". 5 min di lettura preemptiva > 1h di debug e refactoring.
+- **PATH B è più semplice di PATH A**: nessun mutex, nessun replay, nessun retry budget. Quando un piano richiede meccanismi compensatori complessi (mutex, retry, fallback chain), spesso significa che il path è sbagliato — il browser/framework potrebbe già fornire la serializzazione naturale via redirect.
+- **Server Component → header dal proxy** per propagare info request-level. Pattern Next.js standard: `NextResponse.next({ request: { headers } })`. Utile anche per altri use case futuri (es. propagare locale, feature flags, A/B test bucket).
+- **Test 11 (no rotation con cookie validi)** è il "do no harm" check: la modifica non deve attivare rotation in scenario felice. Sempre includerlo nei test E2E.
+
+### Da ricordare
+- **Pattern famiglia `/api/auth/*`**: ogni operazione che richiede cookie writes (set/delete) e va triggerata da Server Component o browser navigation → Route Handler dedicato. Mai `cookies().set()` in Server Component.
+- **Header `x-pathname` + `x-search`** dal proxy: lo standard del progetto per propagare URL corrente ai Server Components. Documentato in `src/proxy.ts`.
+- **Test 10 critical**: ogni feature che fa redirect deve preservare query string originale. Il flusso `/settings?tab=X → rotation → /settings?tab=X` è verificato.
+- **Backend `/api/v1/auth/refresh` rotation server-side è IDEMPOTENTE**: 4 call con stesso refresh token funzionano (ognuno emette nuovi token). Quando aggiungeremo `tv` claim (S5/6), i refresh emessi prima del bump diventeranno invalidi.
+- **Rate limiting su `/api/auth/rotate`**: TODO post-Redis. Per ora un attaccante con refresh token può abusare l'endpoint, ma il backend `/refresh` stesso non ha rate limit — issue equivalente lato backend (vedi ADR-0003 §9).
+
+### Prossimo
+- **Sessione 5**: admin clients endpoints (`POST /api/v1/admin/clients` super_admin only) + onboarding wizard (creare nuovo client, invitare primo client_admin). Userà `require_super_admin` dep + form complessi (forse TanStack Query + react-hook-form qui).
+- **Sessione 4-ter (eventuale)** se emergono altri debiti minori frontend (mobile responsive, custom 404, logo brand). Vedi TODO.md.
+
+---
+
 ## 2026-05-01 — Sessione 4: Frontend dashboard — login flow + struttura base
 
 **Stato**: chiusa. 3 commit su `origin/main`: `36cf243` feat(frontend), `959db08` docs(adr), + commit 3 docs(journal+todo) che contiene questa entry.

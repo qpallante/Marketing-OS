@@ -10,7 +10,8 @@ Per il diario operativo (cosa è stato fatto, frizioni, decisioni) vedi [`JOURNA
 
 | Item | Quando | Note |
 |---|---|---|
-| **Refresh token auto-rotation** | Sessione 4-bis | Catch del 401 da `/me` nel layout (o un client interceptor) → `POST /api/v1/auth/refresh` con cookie refresh → nuovi cookie httpOnly + replay request. Senza, l'utente fa re-login ogni 60min. Vedi ADR-0004 §"Da rivalutare quando". |
+| ✅ ~~**Refresh token auto-rotation**~~ | ~~Sessione 4-bis~~ **DONE** (commit feat S4-bis) | Implementato via Route Handler `/api/auth/rotate` (PATH B). Layout catch 401 → redirect a /api/auth/rotate → POST /refresh → cookies aggiornati → redirect a `to=`. Failure → /api/auth/clear → /login. Vedi [ADR-0005](./infrastructure/docs/architecture/decisions/0005-refresh-token-auto-rotation.md). |
+| **Pattern famiglia `/api/auth/*`** per cookie operations | Riferimento per S5+ | Tutte le operazioni che richiedono cookie writes triggate da Server Component o browser navigation vanno in Route Handler dedicato. Esistenti: `/api/auth/clear`, `/api/auth/rotate`. Pianificati S5+: `/api/auth/password-reset/*`, `/api/auth/email-verification/*`. Mai `cookies().set()` in Server Component. Vedi ADR-0005 §"Pattern emergente". |
 | **Mobile responsive** sidebar | Sessione 5+ | Attuale: `hidden md:block`. Servirà sheet/drawer con menu icon nella topbar (shadcn `Sheet` component). |
 | **Custom `not-found.tsx`** con branding | Sessione 5+ | Attuale 404 default Next.js è generico. Sostituire con pagina branded "Marketing OS — pagina non trovata". |
 | **Pre-compilazione email da `localStorage`** | Sessione 5+ | UX nice-to-have: ricordare l'ultimo email usato per login. Già supportiamo `?email=` nel URL ma localStorage è più friendly. |
