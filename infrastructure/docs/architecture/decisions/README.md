@@ -84,3 +84,4 @@ Link a documenti, RFC, benchmark, conversazioni Slack/issue rilevanti.
 | [0002](./0002-rls-strategy.md) | RLS Strategy: per-session settings con `current_setting` | Accepted |
 | [0003](./0003-jwt-authentication-strategy.md) | JWT authentication strategy (backend) | Accepted |
 | [0004](./0004-frontend-auth-strategy.md) | Frontend authentication strategy (Next.js BFF) | Accepted |
+| [0005](./0005-refresh-token-auto-rotation.md) | Refresh token auto-rotation strategy | Accepted |
