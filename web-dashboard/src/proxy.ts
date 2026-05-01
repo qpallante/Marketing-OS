@@ -17,9 +17,17 @@ import { NextResponse, type NextRequest } from "next/server";
  *  - una validazione completa richiederebbe il `JWT_SECRET_KEY` qui
  *    (duplicato fra core-api e web-dashboard, anti-pattern)
  *  - la validazione vera vive nel `(dashboard)/layout.tsx` (Server Component)
- *    che chiama il backend `/api/v1/auth/me` e gestisce il 401
+ *    che chiama il backend `/api/v1/auth/me` e gestisce il 401 delegando
+ *    a `/api/auth/rotate` (rotation tentativo) o `/api/auth/clear` (cleanup)
  *  - "doppia rete di sicurezza": proxy veloce blocca anonimi prima ancora
- *    del rendering; layout fa il check serio + cleanup cookie su 401
+ *    del rendering; layout fa il check serio
+ *
+ * **`x-pathname` header propagation**: il proxy aggiunge un header
+ * `x-pathname` con il pathname corrente alla request inoltrata. Workaround
+ * Next.js: i Server Components NON hanno `usePathname()` (è un hook React,
+ * solo Client Components). Layout / page Server Components leggono il path
+ * corrente via `headers().get("x-pathname")`. Pattern noto Next.js per
+ * propagare info request-level dal proxy ai Server Components.
  */
 
 /**
@@ -36,15 +44,38 @@ function isProtected(pathname: string): boolean {
   );
 }
 
+/**
+ * Crea una response next() con header `x-pathname` e `x-search` aggiunti
+ * alla request inoltrata. Da usare ogni volta che il proxy passa al next
+ * handler senza redirigere (sia per path protetti con cookie, sia per path
+ * pubblici).
+ *
+ * Due header separati per pulizia semantica:
+ *  - `x-pathname`: solo path (es. `/settings`)
+ *  - `x-search`: query string completa con `?` iniziale (es. `?tab=integrations`),
+ *    o vuota
+ *
+ * Server Components combinano i due quando serve l'URL completo
+ * (es. il layout per redirigere `to=` preservando query string).
+ */
+function nextWithPathname(req: NextRequest): NextResponse {
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-pathname", req.nextUrl.pathname);
+  requestHeaders.set("x-search", req.nextUrl.search);
+  return NextResponse.next({ request: { headers: requestHeaders } });
+}
+
 export function proxy(req: NextRequest): NextResponse {
   const pathname = req.nextUrl.pathname;
 
   if (!isProtected(pathname)) {
-    return NextResponse.next();
+    // Non protetto: passa avanti, propaga x-pathname per consistency
+    // (Server Components su /login potrebbero usarlo per pre-fill, ecc.)
+    return nextWithPathname(req);
   }
 
   if (req.cookies.has("access_token")) {
-    return NextResponse.next();
+    return nextWithPathname(req);
   }
 
   console.info(
@@ -56,6 +87,8 @@ export function proxy(req: NextRequest): NextResponse {
     }),
   );
 
+  // Sul redirect non aggiungiamo x-pathname: l'URL sta cambiando, il path
+  // di destinazione è nuovo. /login leggerà il proprio pathname.
   const url = req.nextUrl.clone();
   url.pathname = "/login";
   url.search = "";
@@ -67,14 +100,14 @@ export function proxy(req: NextRequest): NextResponse {
  * Matcher: applica il proxy a tutti i path **tranne**:
  *  - `_next/static`, `_next/image`: assets statici Next.js (mai protetti)
  *  - `favicon.ico`: file statico
- *  - `api`: TUTTE le Route Handlers (incluso `/api/auth/clear` di step 2)
+ *  - `api`: TUTTE le Route Handlers (incluso `/api/auth/clear` e
+ *    `/api/auth/rotate`)
  *
- * **L'esclusione di `/api` è critica**: `/api/auth/clear` viene chiamato per
- * cancellare cookie auth (es. dopo un 401 dal backend). Se il proxy lo
- * intercettasse e il cookie fosse assente o scaduto, potremmo finire in un
- * loop di redirect (clear → login → ... → clear). I Route Handlers sono
- * endpoint "infrastrutturali" e gestiscono la propria authz se serve
- * (per-handler), non via proxy globale.
+ * **L'esclusione di `/api` è critica**: `/api/auth/clear` e `/api/auth/rotate`
+ * vengono chiamati per gestire cookie auth (cleanup / rotation) e devono
+ * funzionare anche con cookie scaduti/assenti. Se il proxy li intercettasse
+ * potremmo finire in loop di redirect. I Route Handlers `auth/*` gestiscono
+ * la propria logica di authz internamente (presenza refresh_token, ecc.).
  */
 export const config = {
   matcher: ["/((?!_next/static|_next/image|favicon.ico|api).*)"],
