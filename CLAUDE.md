@@ -294,16 +294,17 @@ Per evitare di costruire complessità inutile:
 
 ## Stato attuale del progetto
 
-**Versione:** v0.0.2 (pre-alpha)
+**Versione:** v0.0.3 (pre-alpha)
 **Fase corrente:** Fase 1 — Fondamenta (Mesi 1-3)
-**Sprint corrente:** Settimana 3 — Authentication, JWT, multi-tenant middleware
+**Sprint corrente:** Settimana 4 — Sessione 3-bis (test pytest formali) + Sessione 4 (Frontend dashboard login)
 **Repo:** [github.com/qpallante/Marketing-OS](https://github.com/qpallante/Marketing-OS)
 
 **Cosa è stato costruito:**
 - **Sessione 1 — Bootstrap monorepo** (commit `afab0ae`, chiusa il 2026-05-01): struttura repo (`core-api/`, `web-dashboard/`, `pipelines/`, `infrastructure/`); `core-api` con Python 3.12 + Poetry + FastAPI 0.136 + SQLAlchemy 2.0 async + Alembic + Anthropic/OpenAI SDK + structlog (ruff/mypy strict puliti, `/health` operativo); `web-dashboard` con Next.js 16.2 + React 19 + Tailwind v4 + shadcn/ui (preset `base-nova`, neutral) + ESLint 9 + Prettier (build/lint/typecheck verdi); ADR-0001 in `infrastructure/docs/architecture/decisions/`; connessione a Supabase (progetto `txmkxllfhzrfetordkap`, pooler `eu-west-1` session mode, Postgres 17.6) verificata.
 - **Sessione 2 — Schema multi-tenant + RLS** (commit `b5a18c2` schema, `d5763ad` RLS, chiusa il 2026-05-01): 4 tabelle (`clients`, `users`, `platform_accounts`, `audit_log`) con 4 enum tipizzati, trigger `set_updated_at`, `audit_log` append-only by design; 5 file RLS in `supabase/policies/` (helpers + per-tabella) con pattern `current_setting('app.current_client_id')` + `current_setting('app.is_super_admin')`; smoke test ✅ tutti verdi inclusa verifica fail-closed (0 righe senza `SET LOCAL`); seed Monoloco creato in DB (super_admin + client_admin). **ADR-0002** documenta il contratto del middleware: ogni transazione autenticata DEVE eseguire `SET LOCAL ROLE authenticated` prima di settare le variabili — il role `postgres` è SUPERUSER e bypassa RLS automaticamente.
+- **Sessione 3 — Authentication, JWT, multi-tenant middleware** (commit `9e47293` core auth, `03bf52d` ADR-0003, `54171ad` JOURNAL+TODO, chiusa il 2026-05-01): auth flow JWT operativo end-to-end con `POST /api/v1/auth/{login,refresh,me}`; `JWTAuthMiddleware` ASGI puro popola `request.state.token_payload` e ritorna 401 immediato su token invalido; `get_authenticated_session` esercita end-to-end il contratto ADR-0002 nel router (`/me` lookup client passa da RLS); OpenAPI `BearerAuth` scheme attivo (Swagger "Authorize" button funzionante); strict checks OPTION A (token role/client_id vs DB → mismatch forza re-login); login response uniforme `"invalid credentials"` anti user-enumeration con SHA-256 email hash a log. **ADR-0003** documenta tutte le decisioni JWT (HS256, claims, stateless refresh + exit strategy `tv` claim per Sessione 5/6, lifetimes 60min access / 7d refresh dev / 30d prod, type discriminator, no rate limit per ora). 16/16 inline test passano. Nuovi seed dev: `admin@marketing-os.example`, `admin@monoloco.example` (TLD `.example` per compatibilità con `EmailStr`/`email-validator`).
 
-**Prossima milestone:** Auth flow completo + middleware multi-tenant che applica contratto ADR-0002 (fine Sessione 3).
+**Prossima milestone:** Test pytest formali (Sessione 3-bis) + Frontend dashboard con login funzionante (Sessione 4).
 
 ---
 
