@@ -6,6 +6,21 @@ Per il diario operativo (cosa è stato fatto, frizioni, decisioni) vedi [`JOURNA
 
 ---
 
+## Frontend (post Sessione 4)
+
+| Item | Quando | Note |
+|---|---|---|
+| **Refresh token auto-rotation** | Sessione 4-bis | Catch del 401 da `/me` nel layout (o un client interceptor) → `POST /api/v1/auth/refresh` con cookie refresh → nuovi cookie httpOnly + replay request. Senza, l'utente fa re-login ogni 60min. Vedi ADR-0004 §"Da rivalutare quando". |
+| **Mobile responsive** sidebar | Sessione 5+ | Attuale: `hidden md:block`. Servirà sheet/drawer con menu icon nella topbar (shadcn `Sheet` component). |
+| **Custom `not-found.tsx`** con branding | Sessione 5+ | Attuale 404 default Next.js è generico. Sostituire con pagina branded "Marketing OS — pagina non trovata". |
+| **Pre-compilazione email da `localStorage`** | Sessione 5+ | UX nice-to-have: ricordare l'ultimo email usato per login. Già supportiamo `?email=` nel URL ma localStorage è più friendly. |
+| **Logo immagine** Marketing OS | Quando definito brand | Sostituire i `<h2>Marketing OS</h2>` text-only nella sidebar/login con `<Image src="/logo.svg">`. Sessione 5+ se urge. |
+| **`openapi-typescript`** per type generation da `/openapi.json` | Quando endpoint backend > 10 | Per ora 4 endpoint, manual TS types in `src/lib/types.ts` sostenibile. Vedi ADR-0004 §2. |
+| **TanStack Query** (`@tanstack/react-query`) | Quando emergerà la prima mutation client-side complessa | Per ora Server Components fanno tutto il fetch. Aggiungeremo on-demand. Vedi ADR-0004 §3. |
+| **Decisione su `/`** (home page) | Sessione 5+ | Attuale: placeholder Sessione 1. Opzioni: redirect a `/login`, redirect a `/dashboard` se loggato, oppure pagina pubblica brandizzata. Decidere quando avremo signup flow. |
+| **CORS sul backend** | Quando arriveranno client esterni | Per ora BFF puro, no CORS. Quando S6+ porterà OAuth Meta consumer-side o partner integrations, configurare. |
+| **Request ID middleware + structlog binding** | Sessione 5+ | Bind `request_id` su `structlog.contextvars` lato backend per log tracing → frontend potrebbe propagare via header. Pattern già anticipato in `app/db/session.py` (S2). |
+
 ## Auth (post Sessione 3)
 
 | Item | Quando | Note |

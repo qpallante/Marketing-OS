@@ -6,6 +6,57 @@ Entry in ordine cronologico inverso (più recenti in alto). Aggiornamento manual
 
 ---
 
+## 2026-05-01 — Sessione 4: Frontend dashboard — login flow + struttura base
+
+**Stato**: chiusa. 3 commit su `origin/main`: `36cf243` feat(frontend), `959db08` docs(adr), + commit 3 docs(journal+todo) che contiene questa entry.
+
+### Cosa è stato fatto
+- **API helper + types**: `lib/config.ts` (typed env reader), `lib/types.ts` (User/LoginResponse/ClientSummary/ApiErrorBody, snake_case match backend, no `any`), `lib/api/server-fetch.ts` (`backendFetch` con cookie auth automatico, `cache: "no-store"`), `lib/api/auth-context.ts` (`getCurrentUser` cached con `React.cache()`, `AuthRequiredError`/`NetworkError`).
+- **Login flow**: `lib/actions/auth.ts` con `loginAction` Server Action (Zod-less validation, error mapping 401/422/network → messaggi user-friendly italiani, set di 2 cookie httpOnly con `Secure` gated su NODE_ENV) + `logoutAction` (cookie cleanup + redirect, no backend call). `app/login/page.tsx` Server Component (stale token check via `/me`, redirect a `/api/auth/clear` se 401). `app/login/login-form.tsx` Client Component con `useActionState`.
+- **Cookie cleanup centralizzato**: `app/api/auth/clear/route.ts` Route Handler GET che cancella access+refresh cookies (workaround alla limitazione dei Server Components che NON possono mutare cookies in Next 15+/16). Sanitize `?to=` anti open-redirect.
+- **Auth guard**: `src/proxy.ts` (Next.js 16 ex-`middleware.ts`), 4 PROTECTED_PREFIXES (dashboard, content, analytics, settings — NB no `/campaigns`), presence-only check, sanitize `next=`. Matcher esclude `_next/static`, `_next/image`, `favicon.ico`, `api`.
+- **Dashboard layout**: `app/(dashboard)/layout.tsx` Server Component con double-check pattern (cookie presence + `getCurrentUser`), 3 esiti distinti (200/401/network — il network blip NON cancella i cookie). `components/dashboard/sidebar.tsx` Client Component con `usePathname` per active state. `components/dashboard/topbar.tsx` Server Component con `<form action={logoutAction}>` (no Client). 4 placeholder pages.
+- **shadcn aggiunti**: Card, Input, Label.
+- **Nuova dep**: `server-only` (build-time enforcement separazione server/client per `config.ts`, `server-fetch.ts`, `auth-context.ts`, `actions/auth.ts`).
+- **ADR-0004**: documenta BFF pattern, JWT in cookie httpOnly, fetch+manual types, no global state, exit strategies.
+- **CLAUDE.md**: aggiunta nota Next.js 16 breaking change (middleware → proxy) nello stack tecnologico.
+
+### Frizioni reali
+1. **Next.js 16 ha rinominato `middleware.ts` → `proxy.ts`** (breaking change, scoperto solo dopo che il primo run con `middleware.ts` non redirigeva). La docs ufficiale è in `node_modules/next/dist/docs/01-app/02-guides/upgrading/version-16.md`. La function export `middleware()` → `proxy()`. Inoltre con `src/` directory layout il file va in `src/proxy.ts`, NON a root come dicono molti tutorial (datati Next ≤14). Lezione: leggere SEMPRE i docs della major version installata, non Stack Overflow.
+2. **Server Components in Next 15+/16 NON possono mutare cookies**. `cookies().delete()` funziona solo in Server Action o Route Handler. Spec di step 2 chiedeva al `/login` Server Component di cancellare cookie su 401. Workaround: piccolo Route Handler `/api/auth/clear?to=/login` (idempotente, sanitize `to` anti open-redirect) che fa il cleanup e redirige. Riusato anche dal `(dashboard)/layout.tsx` su 401 — un solo posto centralizzato.
+3. **`React.cache()` per evitare prop drilling layout→pages**. Il layout chiama `getCurrentUser` per la auth check; `/settings` page la chiama di nuovo per mostrare info utente. Senza memoization, 2 fetch al backend per request. `cache(...)` da React 19 memoizza per request-tree → 1 fetch totale verificato. Pattern utile, da ricordare.
+4. **`web-dashboard/.gitignore` ignorava `.env.example`**: il pattern `.env*` di create-next-app non aveva l'eccezione `!.env.example`. Aggiunta. Senza questo fix, il template per chi clona la repo non sarebbe stato committato.
+5. **email-validator (Sessione 3) era già rimasto come strascico**: nessuna nuova frizione qui, ma confermato che `EmailStr` rifiuta `.local`/`.test`. Seed con `.example` (Sessione 3 fix) ha funzionato a livello frontend al primo colpo.
+
+### Decisioni rilevanti
+Tutte tracciate in [ADR-0004](./infrastructure/docs/architecture/decisions/0004-frontend-auth-strategy.md). Punti critici:
+- **BFF pattern** con cookie httpOnly: browser parla solo con Next.js, il JWT non lascia mai server-side. No CORS necessario (browser non chiama il backend direttamente).
+- **`fetch` nativo + manual TS types**: niente axios/openapi-fetch. Exit: `openapi-typescript` quando endpoint > 10.
+- **No global state JS**: source of truth = cookie + `React.cache(getCurrentUser)`. Niente Context/Zustand/Jotai/TanStack Query (S4). Exit: TanStack Query per mutation client-side complesse (S5+).
+- **Proxy presence-only + layout double-check**: doppia rete di sicurezza, no `JWT_SECRET_KEY` duplicato fra core-api e web-dashboard.
+- **Refresh auto-rotation rimandato a Sessione 4-bis**: per ora se access scade → 401 → /login. UX da molestia ogni 60min, accettabile per dev.
+
+### Lezioni apprese
+- **Verificare docs della major version installata** prima di copiare pattern dal web. Next.js, Tailwind v4, shadcn — tutti hanno breaking changes recenti che i tutorial non riflettono. `node_modules/<lib>/dist/docs/` o equivalente è authoritative.
+- **`React.cache()`** + Server Components è il modo idiomatico Next 16 per "passare dati dal layout alle pages" senza props drilling né Context. Cache-scope = request, perfetto per per-request data come user info.
+- **Server Components vs Client Components** → la regola: Server di default, Client SOLO quando serve interattività JS (hooks come `usePathname`, `useState`, `useActionState`). Topbar (no JS) → Server. Sidebar (`usePathname`) → Client. Layout (read cookies + fetch) → Server. Login form (`useActionState` per pending) → Client.
+- **Cookie mutation rules**: scrivibili solo in Server Action e Route Handler. Workaround = Route Handler dedicato per cleanup, condiviso fra punti di chiamata.
+- **`<form action={ServerAction}>`** è il pattern modern Next 16 per logout/azioni semplici da Server Components — niente Client Component necessario, niente JS bundle extra.
+
+### Da ricordare
+- **Route group `(dashboard)`**: parentesi tonde nel nome cartella → non appare nell'URL ma il layout interno applica a tutti i child. URL effettivi: `/dashboard`, `/content`, `/analytics`, `/settings`. Pattern utile per layout shared.
+- **`/api/auth/clear`**: pattern centralizzato per cancellare cookie auth. Riusato dal /login (token stale check) E dal dashboard layout (401 da /me). Quando aggiungeremo /me con `tv` claim cambiato, stesso flow.
+- **Backend porta**: `BACKEND_URL=http://localhost:8001` in dev. Fallback nel `config.ts`. In prod via env.
+- **Seed dev credenziali** (DEV ONLY, salvate in password manager): `admin@marketing-os.example` (super_admin), `admin@monoloco.example` (client_admin).
+- **`/` home page**: ancora il placeholder Sessione 1 ("Marketing OS / Sessione 1 — Bootstrap completato"). Decisione su cosa farne (redirect a /login o /dashboard, o landing page) rimandata. Vedi TODO.md.
+- **Mobile**: sidebar `hidden md:block` — su schermi <md non c'è menu. Mobile responsive da sistemare in S5+.
+
+### Prossimo
+- **Sessione 4-bis** (probabile): refresh token auto-rotation. Quando access scade → catch del 401 dal layout o middleware → `POST /api/v1/auth/refresh` con cookie refresh → nuovi cookie + replay request. Eviterà l'UX-molestia di re-login ogni 60min.
+- **Sessione 5** (prompt 07): admin endpoints (clients management) + onboarding wizard nuovo cliente. Backend `POST /api/v1/admin/clients` + frontend dashboard con tabella/wizard. Richiederà `require_super_admin` dep + form complessi (forse qui TanStack Query / react-hook-form).
+
+---
+
 ## 2026-05-01 — Sessione 3: Authentication, JWT, multi-tenant middleware
 
 **Stato**: chiusa. 3 commit su `origin/main`: `feat(auth): …`, `docs(adr): ADR-0003`, `docs(journal): …`. (Sessione 3-bis copre i test pytest formali in `core-api/tests/`, deferred.)
