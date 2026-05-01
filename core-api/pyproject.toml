@@ -20,6 +20,7 @@ dependencies = [
     "anthropic>=0.40.0,<1.0.0",
     "openai>=1.50.0,<3.0.0",
     "greenlet (>=3.5.0,<4.0.0)",
+    "bcrypt (>=5.0.0,<6.0.0)",
 ]
 
 [tool.poetry]
