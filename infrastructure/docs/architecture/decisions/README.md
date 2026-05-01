@@ -81,3 +81,4 @@ Link a documenti, RFC, benchmark, conversazioni Slack/issue rilevanti.
 | ID | Titolo | Status |
 |----|--------|--------|
 | [0001](./0001-stack-tecnologico-iniziale.md) | Stack tecnologico iniziale | Accepted |
+| [0002](./0002-rls-strategy.md) | RLS Strategy: per-session settings con `current_setting` | Accepted |
