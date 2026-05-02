@@ -6,6 +6,12 @@ Entry in ordine cronologico inverso (più recenti in alto). Aggiornamento manual
 
 ---
 
+## 2026-05-02 — Note: porte standardizzate 8001/3001 per progetto
+
+Convenzione di sviluppo locale fissata: backend su `:8001`, frontend su `:3001`. Le porte di default 8000 e 3000 sono occupate da altri progetti dell'utente sulla stessa macchina (es. `:3000` → Vortex Trading System Python). Aggiornati `core-api/.env(.example)`, `web-dashboard/.env.local(.example)`, `web-dashboard/package.json` (script `dev` con `--port 3001`), CLAUDE.md §"Stack tecnologico". Niente `chore` di migrazione: i servizi giravano già su queste porte, abbiamo solo allineato la documentazione e i default.
+
+---
+
 ## 2026-05-01 — Sessione 4-bis: Refresh token auto-rotation
 
 **Stato**: chiusa. 3 commit su `origin/main`: feat(auth-frontend), docs(adr) ADR-0005, docs(journal) S4-bis.

@@ -60,6 +60,8 @@ Row-level security su Supabase per ogni tabella. Audit log su ogni accesso a dat
 - **UI:** Tailwind CSS v4 (CSS-first config) + shadcn/ui
 
 > **Next.js 16+ breaking change** (importante per chi cerca pattern online): il vecchio `middleware.ts` (Next.js ≤15) è stato rinominato `proxy.ts` (Next.js 16+). La funzione esportata è `proxy()` invece di `middleware()`. Il file va in `src/proxy.ts` (con `src/` layout) o root del progetto Next.js (senza `src/`). Vedere `web-dashboard/src/proxy.ts` come reference. **Sempre verificare la docs della major version installata** via `web-dashboard/node_modules/next/dist/docs/` prima di copiare pattern dal web — molti tutorial fanno riferimento a versioni obsolete.
+
+> **Dev locale: backend su `:8001`, frontend su `:3001`** (entrambe porte 8000/3000 conflittano con altri progetti dell'utente). `FRONTEND_URL`, `CORS_ORIGINS`, `BACKEND_URL` e `PORT` sono già configurati di conseguenza in `core-api/.env(.example)` e `web-dashboard/.env.local`/`.env.example`. Lo script `npm run dev` lancia Next.js già su 3001 (vedi `web-dashboard/package.json`).
 - **Auth:** Supabase Auth con JWT
 - **Storage:** Supabase Storage + Backblaze B2 per media (S3-compatible)
 - **Realtime:** Supabase Realtime
