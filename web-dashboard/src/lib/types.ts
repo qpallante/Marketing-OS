@@ -81,6 +81,20 @@ export interface ListClientsResponse {
   clients: ClientSummary[];
 }
 
+// ─── Auth — accept invitation flow (S6) ─────────────────────────────────────
+
+/**
+ * Body 200 OK di GET /api/v1/auth/invitation/{token} (preview pre-form).
+ * Backend ritorna SEMPRE 404 generico per qualsiasi stato invalido (no
+ * information disclosure). Vedi ADR-0007 §3.
+ */
+export interface InvitationPreviewResponse {
+  email: string;
+  role: InvitationRole;
+  client_name: string;
+  expires_at: string; // ISO 8601
+}
+
 // ─── Error envelope ──────────────────────────────────────────────────────────
 
 /**
