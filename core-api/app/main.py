@@ -9,6 +9,7 @@ from fastapi.openapi.utils import get_openapi
 
 from app.core.config import get_settings
 from app.core.middleware import JWTAuthMiddleware
+from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
 
 settings = get_settings()
@@ -61,6 +62,9 @@ app.add_middleware(JWTAuthMiddleware)
 
 # Auth router: /api/v1/auth/{login,refresh,me}
 app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
+
+# Admin router: /api/v1/admin/* (super_admin only — vedi ADR-0006)
+app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
 
 
 @app.get("/health", tags=["meta"])

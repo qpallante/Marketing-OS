@@ -9,6 +9,8 @@ exit strategy via token_version).
 
 from __future__ import annotations
 
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any
@@ -165,3 +167,27 @@ def decode_access_token(token: str) -> dict[str, Any]:
 def decode_refresh_token(token: str) -> dict[str, Any]:
     """Convenience wrapper: decode_token(token, expected_type=REFRESH)."""
     return decode_token(token, expected_type=TokenType.REFRESH)
+
+
+# ─── Invitation tokens ────────────────────────────────────────────────────────
+
+
+def generate_invitation_token() -> tuple[str, str]:
+    """Genera coppia (plaintext, sha256_hash) per invitation token.
+
+    - **Plaintext**: `secrets.token_urlsafe(32)` → 43 char base64url
+      (~256 bit entropia). Va nel response 201 di POST /admin/clients e
+      poi nel link condiviso col destinatario (mai re-recuperabile dopo).
+    - **Hash**: SHA-256 hex (64 char). L'unica forma persistita in DB
+      (defense-in-depth contro DB leak — vedi ADR-0006).
+
+    Per validare un token in arrivo (accept-invite, Sessione 6): SHA-256
+    del token ricevuto, lookup `invitations.token_hash` per match.
+
+    Bcrypt non è necessario qui: il token è già random + lungo, no
+    rainbow-table risk. SHA-256 è abbastanza per il nostro modello di
+    minaccia (DB leak), e ~zero CPU cost.
+    """
+    plaintext = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(plaintext.encode("utf-8")).hexdigest()
+    return plaintext, token_hash

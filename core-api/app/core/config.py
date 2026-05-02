@@ -44,6 +44,15 @@ class Settings(BaseSettings):
 
     cors_origins: list[str] = ["http://localhost:3000"]
 
+    frontend_url: str = Field(
+        default="http://localhost:3000",
+        description=(
+            "URL base del frontend Next.js. Usato per costruire i link di "
+            "invitation, password reset, email verification. In production "
+            "override via env FRONTEND_URL (es. https://app.marketing-os.com)."
+        ),
+    )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
