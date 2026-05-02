@@ -6,6 +6,77 @@ Entry in ordine cronologico inverso (più recenti in alto). Aggiornamento manual
 
 ---
 
+## 2026-05-03 — Sessione 6: Accept invitation flow + first client_admin onboarding
+
+**Stato**: chiusa. 3 commit su `origin/main`: feat(auth-backend), feat(auth-frontend), docs(adr+journal) ADR-0007.
+
+### Cosa è stato fatto
+
+**Backend** (`core-api/`):
+- **Migration 0003** (`alembic/versions/0003_invitation_accepted_by.py`): aggiunge `accepted_by_user_id UUID NULL FK users(id) ON DELETE SET NULL` alla tabella `invitations`. Rows pending esistenti restano NULL — popolato durante accept-invite insieme a `accepted_at` (linkati 1:1).
+- **Helper centralizzato** (`app/core/invitations.py`): `validate_invitation(db, token_plaintext) -> Invitation` con 4 eccezioni dedicate (`InvitationNotFoundError`, `InvitationRevokedError`, `InvitationAcceptedError`, `InvitationExpiredError`). Ordine deterministico not_found > revoked > accepted > expired (admin action esplicita > scadenza implicita).
+- **Schema extraction** (`app/schemas/auth.py`): trigger ADR-0006 §"Schema extraction" superato — 7 schemi distinti per il router auth. Spostati `LoginRequest`, `LoginResponse`, `RefreshRequest`, `MeResponse`, `ClientSummary` (auth-flavor, no `created_at`), aggiunti `InvitationPreviewResponse`, `AcceptInviteRequest`. Validators riusabili: `InvitationToken` (43 char esatti) + `NewPassword` (12-128).
+- **GET preview** (`app/routers/auth.py::preview_invitation`): public, `openapi_extra={"security": []}`. Sempre **404 generico** per qualsiasi stato invalido. Logging `auth.invitation_preview` con `success`, `reason` (class name eccezione, mai detail), `token_prefix` (8 char di 43).
+- **POST accept** (`app/routers/auth.py::accept_invite`): public, single transaction (validate + INSERT user + UPDATE invitation), READ COMMITTED + `IntegrityError` catch su `users_email_key` → 409. Pattern Public Transactional Handler (vedi sotto). 410 differenziato per UX (expired/already used/revoked) tramite `INVITATION_ERROR_HTTP_MAP`. Riusa `_build_token_pair(new_user)` esistente. Logging `auth.invitation_accepted` con `email_hash` SHA-256, `invitation_id`, `new_user_id`, `client_id`, `role` — mai password, mai token plaintext, mai email plaintext.
+- **9 paranoid checks persistenti** in `scripts/smoke_test_session6.py` (~510 righe, pattern aderente a `scripts/smoke_test_session5.py`). 37 sub-asserzioni totali. Idempotente (pre/post cleanup CASCADE). Test #9 verifica **byte-equality** dei 4 body 404 su 4 stati invalidi distinti — no info disclosure provato empiricamente, non claimed.
+
+**Frontend** (`web-dashboard/`):
+- **Pagina `/accept-invite?token=...`** (`src/app/accept-invite/page.tsx`): Server Component standalone (NON `(dashboard)` group). Fetch GET preview con `auth: false`. 4 fail-paths convergono in `InvitationErrorState` (token assente/malformato, 404 backend, network, parse) → messaggio generico, link `/login`. Card shadcn centrato, no sidebar/topbar.
+- **Form `AcceptInviteForm`** (Client Component): `useActionState` + `useState` per `password`/`confirmPassword`. Counter live "X/12 caratteri minimi" con classi `text-emerald-600` (≥12) / `text-muted-foreground` (<12). Confirm-password match check inline. Submit `disabled` finché `passwordValid && passwordsMatch && !isPending`. Confirm-password **NON** inviato al server (solo client-side guard contro typo).
+- **Server Action `acceptInviteAction`** in `lib/actions/auth.ts`: server-side validation autorevole (token len=43, password 12-128). Mapping 404/410/422/409/5xx → messaggi italiani user-friendly. **410 differenziato** in 3 sub-cases parsando `detail`. Cookies httpOnly identici a `loginAction`. `redirect("/dashboard")` **fuori** dal try/catch (NEXT_REDIRECT signal non deve essere consumato dal generic catch).
+- **Types** (`src/lib/types.ts`): nuovo `InvitationPreviewResponse`.
+- **Proxy verificato**: `PROTECTED_PREFIXES` non include `/accept-invite` — anonimi raggiungono la pagina con HTTP 200, senza redirect a `/login`.
+
+**E2E**: 9/9 paranoid backend + 27/27 HTML render (`/tmp/test_step5.sh` durante S6) + 7/7 E2E backend flow (super_admin crea → accept-invite → /me → re-login). Tutti pass. Smoke S5 continua 9/9 (no regression).
+
+### Frizioni reali
+
+1. **`alembic_version` non visibile da role `authenticated`**. Subito dopo `alembic upgrade head`, query `SELECT version_num FROM alembic_version` con role-swap a `authenticated` ritorna `None` (la system table di alembic non ha GRANT esplicito per `authenticated`). Da role `postgres` (no swap) ritorna `0003_invitation_accepted_by` correttamente. Non è un bug — è behavior atteso (alembic_version è metadata, no RLS, accessibile solo al ruolo che ha eseguito la migration). Documentato per debug futuro: se uno smoke test deve verificare la versione, usare connection senza `SET LOCAL ROLE authenticated`.
+2. **Pattern Public Transactional Handler nato qui**. `get_unauthenticated_db` apre solo `AsyncSession`, NON `session.begin()`. Mentre `get_authenticated_db` apre già il context manager (ADR-0002 richiede SET LOCAL dentro la transazione). Per accept-invite — pre-auth ma multi-write — abbiamo aperto `async with db.begin():` esplicito nel handler. Trigger condition per refactor in helper `get_unauthenticated_session_tx`: ≥2 public transactional handler. ADR-0007 §7 documenta.
+3. **Coupling implicito frontend→backend `detail` strings**. `acceptInviteAction` parsa `detail.includes("expired")` / `"already used"` / `"revoked"` per UX 410. Cambiare wording lato backend rompe il match silenziosamente. Mitigazione attuale: smoke test #2/#3/#4 verifica `detail` esatto. Long-term: header dedicato `X-Invitation-State` con enum (TODO S7+).
+4. **Step 5 prompt re-incollato per errore**. Ho riconosciuto il duplicato e ho confermato lo stato senza rifare il lavoro — risparmio di tempo. Lezione: prima di fare qualcosa, verificare lo stato corrente del filesystem (`ls`, `grep`) — è sempre più veloce.
+5. **8 false-fail iniziali in `/tmp/test_step3.sh` e `/tmp/test_step4.sh`** dovuti a portabilità BSD vs GNU (`head -n -1` non supportato), ANSI escape codes nel structlog console renderer (`email_hash=` separato da `\x1b[0m`), import errati (`_engine` vs `async_session_factory`). Tutti bug del test runner, **zero** bug del codice. Stessa lezione di S5: il test environment merita lo stesso scrutinio del codice di produzione.
+
+### Decisioni rilevanti
+
+8 decisioni in [ADR-0007](./infrastructure/docs/architecture/decisions/0007-accept-invitation-flow.md):
+
+1. `validate_invitation` centralization — single source of truth per i 4 state-check
+2. Password policy NIST 800-63B aligned — 12 char min, no regex compositi, bcrypt 12
+3. GET preview always-404-on-invalid — byte-identical bodies, no info disclosure
+4. POST 410 sub-cases differenziati — UX > security marginal su submit
+5. READ COMMITTED + UNIQUE constraint catch — no SERIALIZABLE
+6. Auto-login Opzione A — cookies + redirect /dashboard, pattern Slack/Notion/GitHub
+7. Public Transactional Handler — pattern emergente, helper deferred a 2° consumer
+8. `_build_token_pair` shared — riuso, non estrazione preventiva (≥3 consumer trigger)
+
+### Lezioni apprese
+
+- **"Verify pattern più semplice già usato altrove prima di accettare l'over-engineering"**: il piano iniziale proponeva SERIALIZABLE per atomicity. Disagree gentilmente con UNIQUE catch + 409 (già in `admin.py::create_client`) → adottato. Lezione salvata in feedback memory persistente.
+- **"Always-404-on-invalid" si verifica empiricamente, non si claima**: smoke check #9 confronta byte-by-byte i 4 response body. Diverso dal "controlliamo i 4 detail dal lato code review" — qui mostriamo che dal punto di vista network gli stati sono indistinguibili.
+- **Pattern test persistente vs inline**: `/tmp/test_stepN.sh` ottimo per iterare durante una sessione, ma non sopravvive al riavvio del Mac. `scripts/smoke_test_sessionN.py` in version control è il pattern stabilito (S5 + S6 ora). Idempotenza + non-regression check del file precedente è ora la convenzione.
+- **Non-regressione automatica**: lanciare `smoke_test_session5.py` dopo modifiche di S6 — entrambi 9/9 — dimostra che il sistema regge 6 sessioni di iterazione. Costo: ~30 secondi a smoke test.
+- **Public Transactional Handler ≠ template**: nato dall'esercizio reale di accept-invite. Aspettiamo il 2° consumer concreto (password-reset più probabile candidato) prima di astrarre in helper. Premature abstraction è anti-pattern documentato in CLAUDE.md.
+
+### Da ricordare
+
+- **Pattern famiglia `/api/v1/admin/*`** (S5) + **`/api/v1/auth/*`** ora include 5 endpoint: `/login`, `/refresh`, `/me`, `/invitation/{token}` (S6 GET preview), `/accept-invite` (S6 POST submit).
+- **Schema extraction trigger consolidato**: ≥5 schemi distinti per router → estrarre in `app/schemas/<area>.py`. Auth router migrato in S6 con 7 schemi.
+- **Pattern `validate_<entity>` con eccezioni dedicate**: helper centralizza state-check, gerarchia di eccezioni mappabili a HTTP codes. Riutilizzabile per future entity (es. `validate_password_reset_token`, `validate_magic_link`).
+- **Public Transactional Handler**: `Depends(get_unauthenticated_db)` + `async with db.begin():` esplicito. Quando arriverà il 2° consumer, helper `get_unauthenticated_session_tx`.
+- **Smoke test persistente per sessione**: `scripts/smoke_test_sessionN.py`, 9 paranoid checks, idempotente con CASCADE cleanup, includere check #9 di "no info disclosure" quando applicabile.
+
+### TODO emersi durante S6
+
+- [ ] **SMTP/SES/Resend** per email invitation automatica (S7+)
+- [ ] **UI super_admin per revoke + re-invite** invitation (S7+)
+- [ ] **`get_unauthenticated_session_tx` helper** quando 2° public transactional handler (probabile password-reset S7+)
+- [ ] **Estrazione `_build_token_pair` in helper standalone** (`app/core/auth_tokens.py`?) quando ≥3 consumer
+- [ ] **Header `X-Invitation-State` con enum** invece di parsing `detail` lato frontend (quando 4° sub-stato 410)
+- [ ] **Regression script**: `scripts/run_all_smoke_tests.sh` che lancia smoke S2/S5/S6 in sequenza. Pre-commit hook futuro?
+
+---
+
 ## 2026-05-02 — Sessione 5: Admin clients endpoints + onboarding wizard
 
 **Stato**: chiusa. 3 commit su `origin/main`: feat(admin-backend), feat(admin-frontend), docs(adr) ADR-0006 + JOURNAL + TODO.
