@@ -300,7 +300,7 @@ Per evitare di costruire complessità inutile:
 
 **Versione:** v0.0.6 (pre-alpha)
 **Fase corrente:** Fase 1 — Fondamenta (Mesi 1-3)
-**Sprint corrente:** Settimana 6 — Sessione 6 (accept invitation flow + first client_admin onboarding) o Sessione 5-bis (admin endpoints estesi)
+**Sprint corrente:** Settimana 6 — Sessione 6 (accept invitation flow + first client_admin onboarding)
 **Repo:** [github.com/qpallante/Marketing-OS](https://github.com/qpallante/Marketing-OS)
 
 **Cosa è stato costruito:**
