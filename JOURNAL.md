@@ -6,6 +6,71 @@ Entry in ordine cronologico inverso (più recenti in alto). Aggiornamento manual
 
 ---
 
+## 2026-05-02 — Sessione 5: Admin clients endpoints + onboarding wizard
+
+**Stato**: chiusa. 3 commit su `origin/main`: feat(admin-backend), feat(admin-frontend), docs(adr) ADR-0006 + JOURNAL + TODO.
+
+### Cosa è stato fatto
+
+**Backend** (`core-api/`):
+- **Schema `invitations`** (`app/models/invitation.py`, migration `0002_invitations.py`): UUIDPKMixin + CreatedAtMixin (no `updated_at` — append-only by design, state derivato da `{accepted_at, revoked_at, expires_at}`). FK CASCADE su `client_id`, FK SET NULL su `invited_by_user_id` (accountability dopo offboarding admin). UNIQUE PARTIAL INDEX su `(client_id, email) WHERE accepted_at IS NULL AND revoked_at IS NULL` per impedire più pending simultanee per la stessa coppia.
+- **RLS `005_invitations.sql`**: super_admin only su tutte le operazioni (S5 baseline). Pattern `current_setting('app.is_super_admin')` consolidato dal contratto ADR-0002. Policy `client_admin SELECT own client invitations` rimandata a S6 (portale onboarding lato cliente).
+- **Token strategy** (`app/core/security.py::generate_invitation_token`): `secrets.token_urlsafe(32)` plaintext (256 bit, 43 char URL-safe) + SHA-256 hex (64 char) in DB. Pattern industry (GitHub PAT, Stripe restricted keys). Nessun bcrypt: il token è già high-entropy, short-lived, no riuso cross-site.
+- **Pattern famiglia `/api/v1/admin/*`** (`app/routers/admin.py`): consolidato simmetrico a `/api/v1/auth/*`. Endpoint S5: `POST /clients` (crea client + invitation) e `GET /clients` (lista). Tutti `Depends(require_super_admin)` + RLS authoritative.
+- **Schemas extraction** (`app/schemas/admin.py`): 5 Pydantic models distinti → trigger di estrazione superato. Auth router resta inline (4 schemi); migra in S6+.
+- **Logging GDPR-friendly**: `invitation_created` structured log con `email_hash` (SHA-256 hex), `invitation_id`, `client_id`, `expires_at`, `invited_by`, `role`. **Mai presente**: email plaintext, token plaintext, `invitation_url` completo. Plaintext esiste UNA SOLA VOLTA, nel response body 201.
+- **9 test paranoici** in `tests_smoke/`: RLS bypass attempts (3 ruoli × INSERT/SELECT/DELETE), plaintext leakage, FK CASCADE behavior, UNIQUE PARTIAL INDEX (più pending stessa email/client), role enforcement at endpoint (403 client_admin), email lowercase normalization. **9/9 pass + 26 sub-asserzioni**.
+
+**Frontend** (`web-dashboard/`):
+- **Route group `(dashboard)/admin/*`** con layout guard secondario: `getCurrentUser()` cached (zero overhead vs parent), redirect silenzioso a `/dashboard` se non super_admin (security through obscurity, no 403 esplicito).
+- **Sidebar role-aware**: prop `isSuperAdmin?: boolean`, sezione "Admin" condizionale separata visivamente. client_admin/member non vedono trace dell'area admin.
+- **Proxy update**: `/admin` aggiunto a `PROTECTED_PREFIXES` per fast-path redirect anonimi a `/login`.
+- **Lista clients** (`(dashboard)/admin/clients/page.tsx`): Server Component fetch via `backendFetch`, Card per cliente con StatusBadge inline (no shadcn Badge, span Tailwind con preset emerald/amber/muted), empty state.
+- **New client form** (`(dashboard)/admin/clients/new/`): Server Component thin host + Client Component con `useActionState`. **NO redirect post-success**: success panel inline con campo readonly + bottone "Copia link" (`navigator.clipboard.writeText`, feedback "Copiato!" 2s, fallback select-on-focus). Il super_admin DEVE vedere e copiare l'URL — il plaintext esiste solo in questa response.
+- **Server Action `createClientAction`**: error mapping differenziato 401/403/409/422/5xx. 409 con detail "email already in use" / "slug already exists" → field-error attribuito al campo giusto. 422 generico (no parsing Pydantic verbose). `revalidatePath("/admin/clients")` post-success.
+- **Types extension**: `ClientSummary.created_at?: string` (optional perché /me non lo serializza, /admin/clients sì), nuovi `InvitationRole`, `InvitationSummary`, `CreateClientResponse`, `ListClientsResponse`.
+
+**E2E**: 41 sub-asserzioni live contro frontend :3001 + backend :8001. Coprono auth flow super_admin/monoloco_admin, UI gates (sidebar role-aware, layout guard, proxy redirect), creation flow end-to-end (status, body parse, log strutturato, FRONTEND_URL=:3001), revalidatePath, validation 422 (3 cases) + 409 con detail attribuibile (dup slug `monoloco`, dup email `admin@monoloco.example`), cleanup CASCADE. (e) clipboard via static analysis del bundle (sostituto del manual click — pattern accettato per assenza di Playwright). 41/41 pass.
+
+### Frizioni reali
+
+1. **`flush()` vs `commit()` nel context manager auto-commit**. Smoke test step 2 lanciava `InvalidRequestError: Can't operate on closed transaction` perché il router faceva `await session.commit()` esplicito, ma `get_authenticated_session` apre già `async with session.begin()` come context manager auto-commit. Il commit chiudeva la transazione prima dell'exit del context manager. Fix: `await session.flush()` per ottenere `id` generati senza chiudere — il commit avviene automaticamente quando l'handler termina e FastAPI consuma il generator dependency. Lezione documentata inline nel router admin + ADR-0006 §4.
+2. **Pattern famiglia `/api/v1/admin/*`** è la prima volta che decidiamo a freddo come organizzare i prossimi N admin endpoint (DELETE client, PATCH status, resend/revoke invitation, audit log queries). Decisione: un solo `app/routers/admin.py` con tutto lì dentro finché non supera ~10 endpoint, poi split per area (clients, invitations, audit). Stessa filosofia "split solo quando giustificato dal volume" del frontend.
+3. **Schema extraction trigger** = quando i schemi distinti superano ~5. Auth router con 4 inline è ancora OK; admin con 5 → estratto in `app/schemas/admin.py`. Niente refactor preventivo dell'auth router; migrerà in S6+ se introdurrà nuovi schemi.
+4. **NO redirect post-creation client** è una decisione di security UX poco intuitiva. Pattern naturale per un form "wizard" è redirect alla lista; ma qui il plaintext token esiste solo nella response 201 — se redirigiamo, il super_admin perde l'unica chance di copiarlo. Quindi success panel inline + bottone "Torna alla lista" esplicito. Documentato in ADR-0006 §7 e nel commento `NewClientForm`.
+5. **Proxy `/admin` aggiunto a PROTECTED_PREFIXES** non è strettamente necessario (layout `(dashboard)` già fa redirect via cookie check), ma serve a fare il redirect più early — prima del rendering. Coerente con gli altri 4 prefix protected. Costo zero, sicurezza marginalmente migliore.
+6. **Status badge inline** invece di shadcn Badge: niente nuova dependency. Per 3 stati discreti con icone solo testuali, uno `<span>` con `Record<status, classNames>` è più semplice e zero kb. Quando arriveranno status più articolati o avremo già Badge per altri usi, si potrà standardizzare.
+7. **41 E2E sub-asserzioni live** scoprivano 8 bug di scripting iniziali (BSD `head -n -1` non supportato, ANSI escape codes nello structlog console renderer che spezzavano il regex `email_hash=`, import sbagliato `_engine` vs `async_session_factory` in cleanup, regex `super_admin` vs response "super admin" con spazio). Tutti bug del test runner, zero bug del codice. Lezione: il test environment merita lo stesso scrutinio del codice di produzione — i false-fail sono cari da debuggare.
+
+### Decisioni rilevanti
+
+Tutte tracciate in [ADR-0006](./infrastructure/docs/architecture/decisions/0006-admin-clients-onboarding.md). Punti critici:
+
+- **Pattern famiglia `/api/v1/admin/*`** simmetrica a `/api/v1/auth/*`.
+- **Token plaintext one-shot**: SHA-256 in DB, mai recuperabile. Pattern industry.
+- **State derivation > state column** in `invitations`: nessun trigger, nessun desync.
+- **Logging GDPR-friendly**: `email_hash` standardizzato attraverso auth + admin.
+- **NO redirect post-success**: il super_admin DEVE vedere `invitation_url` inline.
+- **Error mapping 401/403/409/422/5xx differenziato**: ogni status suggerisce un'azione diversa all'utente.
+- **UI guard layered**: proxy fast-path → layout role-check → backend RLS.
+- **Scope limitations esplicite** (S6+): email automatica, accept-invite endpoint, resend/revoke, RLS client_admin own-invitations, multi-tenant per utente, paginazione, audit_log row.
+
+### Lezioni apprese
+
+- **Trap n.3 di S5 dopo middleware→proxy (S4) e Server Component cookies (S4-bis)**: `flush()` vs `commit()` dentro `Depends` con context manager auto-commit. Pattern emergente: ogni session/router/middleware piuttosto recente in async Python ha trappole specifiche; la docs ufficiale è la prima fonte, non il codice di esempio web.
+- **Test paranoici come fixture stabile del workflow**: S2 RLS, S3 auth, S5 admin. Diventano la "canary line" di sicurezza prima di toccare endpoint che mescolano permission + cross-tenant + plaintext sensibile. ~30 minuti di scrittura, salvano ore di debug post-deploy.
+- **Bug del test runner ≠ bug del codice**: 8 false-fail iniziali tutti dovuti a portabilità BSD/GNU + ANSI escapes + import errati. Diagnosticabili in 5 minuti se si parte dall'ipotesi "il codice funziona, lo script è rotto" — il contrario costa molto.
+- **Decidere di NON redirigere è anch'essa una decisione architetturale**: il pattern naturale era redirect-to-list post-create. Override esplicito perché il plaintext token vincolerebbe l'utente a perderlo. Documentato in ADR-0006 perché è il tipo di decisione che 6 mesi dopo qualcuno potrebbe "ottimizzare via" senza capire la motivazione.
+
+### Da ricordare
+
+- **Pattern famiglia `/api/v1/admin/*`**: ogni futuro endpoint admin server-side va lì. Stessa estensione del backend `/api/v1/auth/*`. Speculare al frontend `/api/auth/*`.
+- **Plaintext token policy**: `secrets.token_urlsafe(32)` + SHA-256 hex in DB; plaintext esiste UNA SOLA VOLTA nel response 201; mai loggato; UI mostra inline + bottone copia. Questo template si ripete per password reset (S5+), email verification (S5+), API keys (Phase 2).
+- **State derivation > status column** per entità append-only: `invitations.{accepted_at, revoked_at, expires_at}` derivano lo stato. Riutilizzabile per `audit_log`, future `webhooks`, `api_keys`.
+- **`flush()` not `commit()`** dentro un handler che usa `Depends(get_authenticated_session)`. Documentato inline nei router; quando aggiungeremo nuovi handler con scrittura DB, ricordare il pattern.
+
+---
+
 ## 2026-05-02 — Note: porte standardizzate 8001/3001 per progetto
 
 Convenzione di sviluppo locale fissata: backend su `:8001`, frontend su `:3001`. Le porte di default 8000 e 3000 sono occupate da altri progetti dell'utente sulla stessa macchina (es. `:3000` → Vortex Trading System Python). Aggiornati `core-api/.env(.example)`, `web-dashboard/.env.local(.example)`, `web-dashboard/package.json` (script `dev` con `--port 3001`), CLAUDE.md §"Stack tecnologico". Niente `chore` di migrazione: i servizi giravano già su queste porte, abbiamo solo allineato la documentazione e i default.

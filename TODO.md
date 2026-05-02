@@ -33,14 +33,26 @@ Per il diario operativo (cosa è stato fatto, frizioni, decisioni) vedi [`JOURNA
 | **Refresh token blacklist** (opzionale) | Solo se serve dopo S6 | Probabilmente NON serve se `tv` claim copre il caso. Tabella `revoked_refresh_tokens` con TTL = scadenza naturale del token. |
 | **Strict password policy** al signup (min 8 chars + classi) | Sessione 5+ | Allineato a NIST SP 800-63B. Login resta lasso (vedi ADR-0003 §8). |
 
-## Multi-tenant onboarding (Sessione 5)
+## Multi-tenant onboarding (post Sessione 5)
 
-| Item | Note |
-|---|---|
-| Endpoint `POST /api/v1/admin/clients` (super_admin only) | Crea nuovo client + invita primo client_admin |
-| Wizard onboarding nuovo cliente nel dashboard | Step: dati base → platform stub → invite admin |
-| Email invitation flow | Token-based, scadenza 7 giorni |
-| Dashboard `/admin/clients` con tabella + ricerca | super_admin only |
+| Item | Quando | Note |
+|---|---|---|
+| ✅ ~~Endpoint `POST /api/v1/admin/clients` (super_admin only)~~ | ~~Sessione 5~~ **DONE** (commit feat-admin-backend) | Crea client + invitation. Vedi [ADR-0006](./infrastructure/docs/architecture/decisions/0006-admin-clients-onboarding.md). |
+| ✅ ~~Endpoint `GET /api/v1/admin/clients`~~ | ~~Sessione 5~~ **DONE** | Lista tutti i client (no paginazione finché < 50). |
+| ✅ ~~Wizard onboarding (nuovo client + invitation)~~ | ~~Sessione 5~~ **DONE** | Form `(dashboard)/admin/clients/new` con success panel + copy URL. |
+| ✅ ~~Dashboard `/admin/clients` con lista~~ | ~~Sessione 5~~ **DONE** | Card layout + StatusBadge inline. Search/filter rimandati a quando avremo ~20+ client. |
+| **Email invitation flow** (SES/Resend) | Sessione 6 | S5 ritorna `invitation_url` plaintext nel response, super_admin copia/incolla. Email automatica al cliente in S6 con SES o Resend. |
+| **Endpoint `POST /accept-invite`** (validate token + create user) | Sessione 6 | Frontend `/accept-invite?token=...` è dead end in S5. S6 implementa: lookup invitation by token_hash, scadenza/revoke check, set password, mark `accepted_at`, create user, login. |
+| **Endpoint `POST /admin/invitations/{id}/resend`** | Sessione 6 | Crea nuovo token + estende `expires_at` (vecchio invalidato). |
+| **Endpoint `POST /admin/invitations/{id}/revoke`** | Sessione 6 | Set `revoked_at = now()`. Tentativo di accept dopo revoca → 410 Gone. |
+| **RLS policy `client_admin SELECT own client invitations`** | Sessione 6 | Per il portale di onboarding lato cliente. S5 è super_admin-only. |
+| **Endpoint `DELETE /admin/clients/{id}`** + soft-delete | Sessione 6+ | Decisione: hard delete con CASCADE (semplice) o soft via `status='archived'` (audit-friendly). Probabilmente soft. |
+| **Endpoint `PATCH /admin/clients/{id}/status`** | Sessione 6+ | Pause/resume/archive flow. RLS richiede update di tutti i client_admin status concomitante? Decisione aperta. |
+| **Search/filter in `/admin/clients`** | Quando ~20+ client | Niente search bar finché < 10. |
+| **Paginazione cursor-based `GET /admin/clients`** | Quando > 50 client | Per ora `ORDER BY created_at DESC LIMIT all`. |
+| **Audit log row** per `invitation_created`, `invitation_revoked`, `client_created` | Sessione 6+ | Tabella `audit_log` esiste (S2) ma non è ancora popolata. S6 quando avremo le admin actions distruttive (revoke, delete). |
+| **Audit log queries dashboard** | Sessione 6+ | `/admin/audit` page con filtri per actor/action/target. |
+| **Multi-tenant per utente** (1 email → N clients) | Phase 2 | Refactor: `user_clients` join table, JWT con array `client_ids`, RLS rivedute. Decisione esplicita di S5 di NON farlo finché non emerge una richiesta concreta dal business (Founder/agenzia). |
 
 ## Platform integrations (Sessione 6+)
 
