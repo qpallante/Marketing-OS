@@ -65,6 +65,15 @@ class Invitation(UUIDPKMixin, CreatedAtMixin, Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    #: Sessione 6 — popolato durante accept-invite con id del nuovo User.
+    #: Linkato 1:1 con `accepted_at` (entrambi NULL o entrambi popolati).
+    #: ON DELETE SET NULL: se l'utente accettatore viene cancellato, il record
+    #: invitation rimane come storico ma perde il link. Vedi ADR-0007.
+    accepted_by_user_id: Mapped[UUID | None] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     revoked_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
