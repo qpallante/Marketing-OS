@@ -31,12 +31,16 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 
 /**
- * Path che richiedono autenticazione. NB: solo 4, **non 5** — `/campaigns`
- * è esclusa intenzionalmente. Sarà parte del modulo "Performance" più
- * strutturato (Sessioni 9-10), e definire ora un naming `/campaigns`
- * sarebbe lock-in prematuro. Vedi `TODO.md`.
+ * Path che richiedono autenticazione. NB: `/campaigns` è esclusa
+ * intenzionalmente. Sarà parte del modulo "Performance" più strutturato
+ * (Sessioni 9-10), e definire ora un naming `/campaigns` sarebbe lock-in
+ * prematuro. Vedi `TODO.md`.
+ *
+ * `/admin` aggiunto in S5: il route guard role-based vive in
+ * `(dashboard)/admin/layout.tsx` (redirect a /dashboard per non-super_admin),
+ * ma per anonimi senza cookie il proxy intercetta prima del rendering.
  */
-const PROTECTED_PREFIXES = ["/dashboard", "/content", "/analytics", "/settings"];
+const PROTECTED_PREFIXES = ["/dashboard", "/content", "/analytics", "/settings", "/admin"];
 
 function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some(

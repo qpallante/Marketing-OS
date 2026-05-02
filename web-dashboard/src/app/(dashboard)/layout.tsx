@@ -92,7 +92,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <div className="flex min-h-screen flex-col">
       <Topbar user={user} />
       <div className="flex flex-1">
-        <Sidebar />
+        <Sidebar isSuperAdmin={user.role === "super_admin"} />
         <main className="flex-1 p-6 md:p-8">{children}</main>
       </div>
     </div>

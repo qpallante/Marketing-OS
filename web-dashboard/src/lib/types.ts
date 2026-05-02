@@ -18,11 +18,19 @@ export type ClientStatus = "active" | "paused" | "archived";
 
 // ─── Domain DTOs ─────────────────────────────────────────────────────────────
 
+/**
+ * Riassunto di un client. Usato sia da `/api/v1/auth/me` (campo `client`) sia
+ * da `/api/v1/admin/clients` (lista). Il backend admin include `created_at`,
+ * mentre `/me` non lo serializza — quindi qui è opzionale. Vedi
+ * `core-api/app/routers/auth.py` (ClientSummary inline) e
+ * `core-api/app/schemas/admin.py` (ClientSummary admin).
+ */
 export interface ClientSummary {
   id: string; // UUID v4
   name: string;
   slug: string;
   status: ClientStatus;
+  created_at?: string; // ISO 8601, presente solo da /api/v1/admin/clients
 }
 
 export interface User {
@@ -42,6 +50,35 @@ export interface LoginResponse {
   token_type: "bearer";
   expires_in: number; // seconds (60 min default = 3600)
   refresh_expires_in: number; // seconds (7d dev = 604800, 30d prod = 2592000)
+}
+
+// ─── Admin DTOs (vedi core-api/app/schemas/admin.py) ────────────────────────
+
+export type InvitationRole = "client_admin" | "client_member";
+
+/**
+ * Invitation pending ritornata da POST /api/v1/admin/clients. Il campo
+ * `invitation_url` è il **plaintext una-tantum**: dopo la response 201 non è
+ * più recuperabile (in DB c'è solo l'hash SHA-256). Il super_admin deve
+ * copiarlo subito o l'invitation va revocata + ricreata.
+ */
+export interface InvitationSummary {
+  id: string; // UUID v4
+  email: string;
+  role: InvitationRole;
+  expires_at: string; // ISO 8601
+  invitation_url: string; // plaintext token nell'URL — solo nel response 201
+}
+
+/** Body 201 Created di POST /api/v1/admin/clients. */
+export interface CreateClientResponse {
+  client: ClientSummary;
+  invitation: InvitationSummary;
+}
+
+/** Body 200 OK di GET /api/v1/admin/clients. */
+export interface ListClientsResponse {
+  clients: ClientSummary[];
 }
 
 // ─── Error envelope ──────────────────────────────────────────────────────────
