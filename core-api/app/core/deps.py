@@ -173,3 +173,44 @@ async def require_client_admin(
             detail="admin role required",
         )
     return user
+
+
+async def require_client_access(
+    request: Request,
+    client_id: UUID,
+    user: Annotated[User, Depends(get_current_user)],
+) -> UUID:
+    """403 se l'utente non ha accesso al `client_id` specificato nel path.
+
+    Usata come dependency per la route family `/api/v1/clients/{client_id}/...`
+    (S7+: brand, future content/analytics/campaigns).
+
+    Logica:
+      - super_admin: accesso a TUTTI i client (per debug/onboarding cross-tenant)
+      - client_admin / client_member: accesso SOLO al proprio `client_id`
+
+    Returns:
+        Il `client_id` validato (pass-through nel handler — riduce boilerplate).
+
+    **Defense-in-depth a 3 layer** per la family `/api/v1/clients/{id}/...`:
+      1. Questa dep (HTTP) — 403 prima di qualsiasi DB read
+      2. RLS policy `client_id = current_app_client_id() OR is_super_admin`
+         (DB) — 0 rows se HTTP layer bypassed
+      3. FK CASCADE su `clients.id` — coerenza referenziale
+
+    **No information disclosure** nel detail: "forbidden: client access denied"
+    è generico, non distingue "client X esiste ma non hai accesso" da "client X
+    non esiste". Pattern coerente con ADR-0007 §3 (always-404-on-invalid).
+    """
+    if user.role == "super_admin":
+        return client_id
+
+    if user.client_id != client_id:
+        _reject(
+            "client_access_denied",
+            user_id_from_token=str(user.id),
+            path=request.url.path,
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="forbidden: client access denied",
+        )
+    return client_id

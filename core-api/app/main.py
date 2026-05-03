@@ -1,6 +1,7 @@
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -11,6 +12,7 @@ from app.core.config import get_settings
 from app.core.middleware import JWTAuthMiddleware
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
+from app.routers.brand import router as brand_router
 
 settings = get_settings()
 
@@ -36,10 +38,16 @@ log = structlog.get_logger()
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    # S7: ensure brand_assets storage dir exists (idempotent — `exist_ok=True`).
+    # Gitignored. Migration a Supabase Storage in S+. Vedi ADR-0008.
+    brand_dir = Path(settings.brand_assets_dir).resolve()
+    brand_dir.mkdir(parents=True, exist_ok=True)
+
     log.info(
         "core-api.startup",
         environment=settings.environment,
         version=settings.app_version,
+        brand_assets_dir=str(brand_dir),
     )
     yield
     log.info("core-api.shutdown")
@@ -65,6 +73,11 @@ app.include_router(auth_router, prefix="/api/v1/auth", tags=["auth"])
 
 # Admin router: /api/v1/admin/* (super_admin only — vedi ADR-0006)
 app.include_router(admin_router, prefix="/api/v1/admin", tags=["admin"])
+
+# Brand Brain router: /api/v1/clients/{client_id}/brand/* (S7, vedi ADR-0008).
+# Prefix è dichiarato nel router stesso (path con {client_id} param), niente
+# `prefix=` extra qui.
+app.include_router(brand_router)
 
 
 @app.get("/health", tags=["meta"])

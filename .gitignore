@@ -87,5 +87,16 @@ logs/
 .scratch/
 TODO.local.md
 
+# ── WIP smoke test scripts per sessione (S7+) ───────────────────
+# Pattern: scripts/wip_s<N>/test_step*.py — test temporanei usati
+# durante l'iterazione di una sessione, NON i file persistenti
+# (smoke_test_session<N>.py vive in scripts/ direttamente, committed).
+core-api/scripts/wip_*/
+
+# ── Brand assets storage locale (S7+) ──────────────────────────
+# PDF caricati dal client_admin. Migration a Supabase Storage in S+.
+# Path env-driven via BRAND_ASSETS_DIR (default storage/brand_assets/).
+core-api/storage/
+
 # ── Personal session prompts (kept locally, not committed) ─────
 /07_Prompt_Claude_Code.md

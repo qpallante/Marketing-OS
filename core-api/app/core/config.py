@@ -35,8 +35,33 @@ class Settings(BaseSettings):
     presto). Override a 30 in production via env REFRESH_TOKEN_TTL_DAYS=30.
     Vedi ADR-0003."""
 
+    # ─── AI provider settings (S7 step 3a) ─────────────────────────────────
     anthropic_api_key: str = ""
     openai_api_key: str = ""
+
+    #: Modello LLM Anthropic per generation. Sonnet 4.6 di default
+    #: (cost/quality balance per RAG creative tasks). Override in produzione
+    #: via env `ANTHROPIC_MODEL` se serve Opus 4.7 per task complessi
+    #: (`claude-opus-4-7`) o Haiku 4.5 per task semplici/cheap (`claude-haiku-4-5`).
+    #: Vedi ADR-0008 §AI stack + CLAUDE.md §LLM routing.
+    anthropic_model: str = "claude-sonnet-4-6"
+
+    #: Modello OpenAI per embedding. text-embedding-3-small è 1536-dim, $0.02/1M
+    #: token (~zero cost). Per multilingue stretto valuteremo -large in S+.
+    openai_embedding_model: str = "text-embedding-3-small"
+
+    #: Dimensione del vector prodotto da `openai_embedding_model`. DEVE
+    #: corrispondere a `vector(N)` declared su `brand_chunks.embedding`
+    #: (ALTER TABLE in migration 0004). Cambiarlo richiede re-indexing
+    #: completo di tutti i chunks.
+    embedding_dim: int = 1536
+
+    # ─── Brand assets storage (S7) ─────────────────────────────────────────
+    #: Directory per file PDF caricati. Gitignored (vedi root .gitignore).
+    #: Path relativo alla CWD del processo uvicorn (= `core-api/` dev),
+    #: oppure absolute. La dir viene creata al startup app (lifespan).
+    #: Migration a Supabase Storage in S+. Vedi ADR-0008.
+    brand_assets_dir: str = "storage/brand_assets"
 
     supabase_url: str = ""
     supabase_anon_key: str = ""
