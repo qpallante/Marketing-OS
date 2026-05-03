@@ -6,6 +6,103 @@ Entry in ordine cronologico inverso (più recenti in alto). Aggiornamento manual
 
 ---
 
+## 2026-05-03 — Sessione 7: Brand Brain Foundation
+
+**Stato**: chiusa. 3 commit su `origin/main`: feat(s7) backend, feat(s7) frontend, docs(s7) ADR-0008 + JOURNAL + TODO.
+
+### Sintesi
+
+Primo modulo prodotto AI di Marketing OS: RAG su brand identity + materiale di riferimento per generazioni LLM coerenti con il tono del cliente.
+
+- **Step completati**: 9/9. Asterisco su 7b: live UI test (click-Genera nel browser) deferred a S7-bis per turbopack HMR issue. Backend RAG verificato end-to-end via curl (3 caption Monoloco generated, latency ~5s, qualità pubblicabile).
+- **7 endpoint** `/api/v1/clients/{id}/brand/*`: PUT form, POST upload (PDF), POST text, GET assets, DELETE asset, GET history, POST query.
+- **4 tabelle** + RLS + HNSW pgvector index: `brand_form_data`, `brand_assets`, `brand_chunks`, `brand_generations`.
+- **41 source files** mypy clean (era 27 a fine S6).
+- **Smoke test sub-asserzioni S7**: 54 in `scripts/smoke_test_session7.py`. Cumulativo persistente S5+S6+S7: 72 paranoid checks.
+- **Costo dev cumulativo S7**: ~$0.05 (test reali OpenAI + Anthropic). Una run completa di smoke test costa ~$0.001.
+
+### Cosa è stato fatto
+
+**Backend** (`core-api/`):
+
+- **Migration 0004** (`alembic/versions/0004_brand_brain.py`): 4 tabelle multi-tenant scoped a `client_id`, `vector(1536)` su `brand_chunks.embedding`, FK CASCADE da `clients` e da `brand_assets` → `brand_chunks`.
+- **Migration 0005** separata (`0005_brand_chunks_hnsw_index.py`): indice HNSW con `vector_cosine_ops`, `m=16, ef_construction=64`. Migrazione separata per tunability futura senza toccare lo schema principale.
+- **Adapter pattern AI** (`app/core/ai/`): `EmbedderProtocol` + `LLMProtocol` PEP 544, factory `get_embedder()` / `get_llm()` con singleton lazy. Concrete: `OpenAIEmbedder` (`text-embedding-3-small`) + `AnthropicLLM` (Claude Sonnet 4.6). Token-aware chunking via `cl100k_base` con sliding window 512+50 overlap.
+- **PDF parsing** (`app/core/ai/pdf.py`): `pypdf` + magic-bytes manual check (libmagic non installato, fallback su `data.startswith(b"%PDF-")`).
+- **Indexing pipeline async** (`app/core/brand_indexing.py`): `asyncio.create_task` fire-and-forget post-commit + `_wait_for_asset_visible` polling 10s budget. NOT `BackgroundTasks` (vedi frizioni #4).
+- **Storage filesystem** (`app/core/brand_storage.py`): atomic write tmp+rename, dedup `(client_id, sha256)` UNIQUE constraint → 409 su upload duplicato.
+- **RAG query** (`app/core/brand_query.py`): system prompt XML-tagged (Anthropic best practice), 4 regole (anti-hallucination, dos/donts, no-color-output, **diversity rule**). Diversity rule scoperta empiricamente — senza il vincolo Claude produce 3 variazioni quasi identiche.
+- **7 endpoint** in `app/routers/brand.py` + `Depends(require_client_access)` (nuova dipendenza in `app/core/deps.py`) + RLS policies in `supabase/policies/006_brand_brain.sql`.
+- **54 paranoid checks** in `scripts/smoke_test_session7.py` (12 sezioni `[a-l]`, ~30 sub-asserzioni nidificate). Pre-flight ambiente, indexing pipeline, RAG generation, pagination, CASCADE, tenant isolation, validation, auth boundary, cleanup. Idempotente con CASCADE post-cleanup.
+
+**Frontend** (`web-dashboard/`):
+
+- **Pagina `/brand-brain`** in `(dashboard)` layout. Server Component con `getCurrentUser()` cache hit (no extra fetch oltre al layout). Empty state per super_admin senza `client_id`.
+- **3 tab** shadcn (base-nova, `@base-ui/react/tabs`): Assets (placeholder S7-bis), **Genera (live)**, Storico (placeholder).
+- **GenerateTab Client Component**: Textarea + Button + counter live + `useTransition` + Server Action `runBrandQueryAction`. Render `output_text` + 4 MetaCard (Modello, Latency, Tokens in/out, Chunks usati) + `<details>` reference chunks (asset_filename + chunk_index + similarity).
+- **Server Action** `lib/actions/brand.ts` (NOT BFF route — pattern S5 admin.ts): mapping 401/403/404/422/502/503/504 → messaggi italiani user-friendly, logging strutturato JSON.
+- **shadcn add**: tabs + textarea (label/button/card/input già installati in S4).
+- **Sidebar**: aggiunto "Brand Brain" in `MAIN_NAV` (posizione 2, subito dopo Dashboard).
+- **Auth proxy**: `/brand-brain` aggiunto a `PROTECTED_PREFIXES` (anonimi → 307 → `/login?next=/brand-brain`, verificato).
+
+### Frizioni reali
+
+1. **Supabase default ACL gotcha** (scoperta in S7 step 1 ma rilevante per tutto il progetto): `pg_default_acl` su schema `public` concede `arwdDxtm` (ALL DML) a `authenticated`/`anon`/`service_role` di default. I `GRANT SELECT, INSERT` espliciti di S2-S6 erano ridondanti; i `REVOKE` mancanti su tabelle append-only erano lacune di defense-in-depth non rilevate. Fix S7: `REVOKE UPDATE/DELETE/TRUNCATE ON brand_generations` + `REVOKE UPDATE ON brand_chunks` in `006_brand_brain.sql`. **Pattern stabilito**: per ogni tabella append-only o immutable, REVOKE espliciti dopo i CREATE POLICY. **Debt retroattivo**: `audit_log` (S2) ha probabilmente la stessa lacuna — tracciato in TODO §Security debt come priorità ALTA per S7-bis. Memory persistente salvata.
+
+2. **CAST AS vector** vs `:emb::vector`: SQLAlchemy `text()` + asyncpg ha ambiguità tra `:param` (bind) e `::type` (cast). Il pattern `:emb::vector` parsa errato. Fix: `CAST(:emb AS vector)` (SQL standard). Verificato empiricamente in step 2 + 5b.2 + 6.
+
+3. **`BackgroundTasks` blocca commit della request transaction**: con `BackgroundTasks.add_task` + bg task che usa `Depends(get_authenticated_session)`, l'asset INSERT della **request** transaction era invisibile per >22s. Workaround S7: `asyncio.create_task` fire-and-forget post-commit + `_wait_for_asset_visible` polling pattern. Root cause non investigato — debt S7-bis.
+
+4. **`libmagic` not installed** sul Mac dev: `import magic` failed. Workaround: magic-bytes manual check `data.startswith(b"%PDF-")` per S7 single-MIME allowlist. Per S+ multi-format: `brew install libmagic` + `pip install python-magic`.
+
+5. **`alembic_version` non visibile da role `authenticated`** (già notato in S6 frizioni #1, riconfermato in S7 step 8): la system table di Alembic non ha GRANT a `authenticated`. Smoke check [k] (alembic head verification) usa session senza `_set_super_admin_context` per avere SELECT come default postgres role.
+
+6. **Frontend turbopack HMR fail su dev sessione lunga (5+ ore)**: su S7 step 7b dopo molte iterazioni il dev server smetteva di ricompilare le modifiche. Live UI test (click Genera) deferred a S7-bis con dev restart pulito. Backend validato via curl (response shape verificato byte-by-byte).
+
+7. **Spec drift**: il prompt utente per step 7b citava schema response (`text`, `model`, `embedding_tokens`) che non matchavano il backend reale (`output_text`, `model_used`, no `embedding_tokens`). Stesso pattern user prompt in step 5c. Lezione: **leggere lo schema reale prima di scrivere il client**, anche se lo spec sembra autorevole. Memory note "Challenge heavy proposals" applicata anche qui.
+
+### Decisioni rilevanti
+
+9 decisioni in [ADR-0008](./infrastructure/docs/architecture/decisions/0008-brand-brain-foundation.md):
+
+1. Adapter pattern AI via PEP 544 Protocol — duck typing, factory lazy
+2. pgvector + HNSW separate migration — tunability futura
+3. Token-aware chunking 512+50 — `cl100k_base` matching OpenAI v3
+4. `asyncio.create_task` (NOT `BackgroundTasks`) — workaround race transazione
+5. Storage filesystem dedup SHA-256 + atomic write — boring tech vince
+6. RAG system prompt XML-tagged — Anthropic best practice + diversity rule
+7. Multi-tenant security 3-layer — HTTP + RLS + FK CASCADE + privacy 404-on-miss
+8. Append-only `brand_generations` — REVOKE espliciti privilege layer
+9. Supabase default ACL gotcha + REVOKE pattern — pattern stabilito post-S7
+
+### Lezioni metodologiche
+
+- **"Challenge heavy proposals" applicata 2 volte in S7**: (a) step 7b BFF route → Server Action (pattern S5 admin.ts già stabilito); (b) step 7b schema response (`text`/`model`/`embedding_tokens` proposti) → schema reale (`output_text`/`model_used`/no `embedding_tokens`). In entrambi i casi: deviazione documentata + flag esplicito al utente.
+- **Sub-divisione step monolitici** (5b → 5b.1 + 5b.2 + 5b.3, 7 → 7a + 7b): ridotta densità cognitiva e creati review gate naturali. Pattern da continuare in S+ per step a rischio (>3 file modificati, integrazioni AI, schema changes).
+- **Test sintetico prima di test reale**: ogni nuova operazione SQL/AI merita un mini-smoke dedicato. Pattern step 2 (CAST AS vector), step 3 (API connectivity), step 7b (real query con saved JSON per evitare control char parsing).
+- **Spec verification via reading > guessing**: lo spec utente è autorevole sull'**intent** ma non sui **dettagli** del codebase reale. Sempre `grep`/`Read` per verificare i field name, i path, i pattern stabiliti prima di scrivere codice.
+- **Embedding pipeline race-condition pattern**: `asyncio.create_task` post-commit + polling per visibility è ora il pattern di riferimento. Se ricorre in S+ (es. webhook async, file processing), generalizzare in helper.
+
+### Da ricordare
+
+- **Pattern famiglia `/api/v1/clients/{id}/brand/*`** (S7) — analogo a `/admin/*` (S5) e `/auth/*` (S3-S6). Naming convention emergente: `{area}/{resource_id}/{subdomain}/*`.
+- **Smoke test persistente per sessione**: `scripts/smoke_test_sessionN.py` ora a 4 file (S2 implicit + S5 + S6 + S7). 72 paranoid checks cumulativi che girano in ~3 min totali.
+- **AI adapter pattern** `EmbedderProtocol` + `LLMProtocol` riutilizzabile per S+: routing cost-aware Sonnet vs Haiku per task semplici, fallback OpenAI in caso di outage Anthropic, multi-provider per recall/quality A/B test.
+- **REVOKE pattern per append-only tables** stabilito in `006_brand_brain.sql`. Da replicare retroattivamente su `audit_log` (S2 debt) e da applicare di default a tutte le future tabelle "history-like".
+- **Anthropic XML-tagged system prompts**: pattern stabilito in `build_system_prompt`. Diversity rule è la più sottile e merita di essere portata in altri moduli (Content Studio, Caption Agent).
+
+### TODO emersi durante S7
+
+Vedi `TODO.md` §S7-bis priorities. Highlights ALTA priorità:
+
+- [ ] **Frontend turbopack HMR + live UI test S7-bis** — chiude il debt visivo del Tab Genera.
+- [ ] **`audit_log` REVOKE retroattivo** — debt S2 confermato in S7, security debt #1.
+- [ ] **`BackgroundTasks` root cause investigation** — capire se è bug nostro pattern session o bug FastAPI.
+- [ ] **`GET /brand/form` endpoint** — manca per S7-bis Tab Assets / brand-form pre-populated UI.
+- [ ] **`libmagic` install + `python-magic` enable** — per S+ multi-format MIME validation.
+
+---
+
 ## 2026-05-03 — Sessione 6: Accept invitation flow + first client_admin onboarding
 
 **Stato**: chiusa. 3 commit su `origin/main`: feat(auth-backend), feat(auth-frontend), docs(adr+journal) ADR-0007.

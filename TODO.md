@@ -6,6 +6,33 @@ Per il diario operativo (cosa è stato fatto, frizioni, decisioni) vedi [`JOURNA
 
 ---
 
+## Security debt (priorità ALTA)
+
+| Item | Priorità | Note |
+|---|---|---|
+| **AUDIT LOG REVOKE** (debt da S2) | **ALTA — S7-bis o sessione dedicata di security audit** | `audit_log` (creata in S2) ha probabilmente le stesse default ACL Supabase del Brand Brain: `pg_default_acl` su public schema concede ALL DML privileges (`arwdDxtm`) a `authenticated`/`anon`/`service_role`. ADR-0002 §"audit_log append-only" reclama "blocco UPDATE/DELETE via RLS + privilege denied", ma in realtà nel contesto Supabase è solo RLS-only. Pattern: stesso REVOKE applicato in `006_brand_brain.sql` per `brand_generations`. **Verifica**: `SELECT has_table_privilege('authenticated', 'audit_log', 'UPDATE');` — atteso `True` (debt confermato) o `False` (già protetto). **Fix**: nuovo file `supabase/policies/004_audit_log_revoke.sql` con `REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM authenticated, anon, service_role;`. **Test**: addendum smoke che verifica `permission_denied` su tentativo UPDATE su `audit_log` da role `authenticated`. **Bonus**: aggiornare nota in ADR-0002 §"audit_log append-only" con la gotcha. |
+
+---
+
+## S7-bis priorities (post Sessione 7 — Brand Brain Foundation)
+
+| Item | Priorità | Note |
+|---|---|---|
+| **Frontend turbopack HMR fix + live UI test Tab Genera** | **ALTA** | Backend RAG validato via curl in S7 (3 caption Monoloco generated, qualità pubblicabile), ma il flow click-Genera nel browser non verificato per turbopack HMR issue su sessione dev di metà giornata. **Fix**: dev restart pulito, oppure investigare HMR config. **Verifica**: aprire `http://127.0.0.1:3001/brand-brain` con login Monoloco, scrivere prompt, click Genera, verificare output renderizzato + MetaCard popolati + reference chunks in `<details>`. |
+| **`BackgroundTasks` root cause investigation** | **ALTA** | Bug noto: con `BackgroundTasks.add_task` + bg task che usa `Depends(get_authenticated_session)`, l'asset INSERT della **request** transaction era invisibile per >22s. Workaround S7: `asyncio.create_task` fire-and-forget post-commit. Capire se è (a) bug nel nostro pattern session management, (b) bug FastAPI/SQLAlchemy noto, (c) interazione con `get_authenticated_session` che apre nuova session prima del commit della request. Test riproducibile: bg task immediato che SELECT su tabella appena INSERT-ata in request. **Bonus**: documentare in ADR / commento nel codice. |
+| **`GET /brand/form` endpoint** | **ALTA** (blocker S7-bis Tab Assets) | Attualmente `/brand/form` è solo PUT (upsert). Per il Tab Assets in S7-bis serve GET per pre-populare il form con i valori esistenti. Pattern: standard CRUD GET + 404 se mai impostato. RLS già copre il client_id scope. |
+| **Tab Assets in `/brand-brain`** | **MEDIA** | Implementare il Tab Assets (placeholder S7): brand form (tone/dos/donts/colors) con `react-hook-form` + Zod validation + counter live keywords (ADR-0006 trigger condition: form >5 input, wizard multi-step). PDF/text upload list con DELETE button (modal conferma) + indexing status badge live (poll su `indexing_status`). |
+| **Tab Storico in `/brand-brain`** | **MEDIA** | Lista paginata di generations con filtro per data + status. Detail view modal con full prompt + output + retrieved_chunks (asset_filename + chunk_index + similarity). Re-run button (pre-fill prompt nel Tab Genera). |
+| **`libmagic` install + `python-magic` enable** | MEDIA (multi-format MIME) | Ora MIME validation è simplified a `data.startswith(b"%PDF-")` (single-MIME allowlist S7). Per S+ multi-format (DOCX, MD, TXT, RTF): `brew install libmagic` (Mac) / `apt install libmagic1` (CI) + uncommit del `import magic` in `brand_storage.py`. |
+| **Cron reconciliation asset `pending`** | MEDIA | `asyncio.create_task` non ha retry / persistence-on-shutdown. Se il processo muore mid-indexing, l'asset resta `indexing_status='pending'` per sempre. Cron job (Celery beat in S8+, o systemd timer interim): asset `pending` da >5 min → re-trigger indexing oppure marca `failed` con reason "worker died". |
+| **Generalizzazione `_wait_for_asset_visible`** | BASSA (se ricorre) | Pattern `asyncio.create_task` post-commit + polling per visibility usato 2 volte in S7 (PDF upload, text upload). Se emerge un 3° consumer (es. webhook handler S+): estrarre helper `wait_for_row_visible(table, id, max_wait_s)`. |
+| **Migrazione storage da filesystem a S3/B2** | BASSA (volume) | Trigger: (a) > 100MB totali per client, (b) deploy multi-instance (Vercel + Railway scale-out), (c) backup automation. Pattern `BrandStorage` (`app/core/brand_storage.py`) già astratto su `Path` interface — interfaccia con `BrandS3Storage` se serve. |
+| **Embedder self-hosted (BGE-large-en o sentence-transformers)** | BASSA (privacy / cost) | Trigger: client esterni con privacy concern (GDPR-sensitive content), oppure cost optimization (embedding OpenAI ~$0.02/1M token, self-hosted ~$0). Pattern Adapter già pronto: nuova classe `LocalEmbedder` che implementa `EmbedderProtocol`. |
+| **Diversity rule riusabile in altri moduli AI** | BASSA | Pattern emergente in S7 system prompt: senza vincolo esplicito Claude produce variazioni quasi identiche. Documentare e riusare quando arriverà Caption Agent / Content Studio. |
+| **Cost tracking row su `brand_generations` con embedding cost separato** | BASSA | Ora `tokens_input` è solo LLM input, `embedding_tokens` non tracciato separatamente. Quando avremo cost dashboard, separare embed cost vs LLM cost (già in note schema brand.py:212). |
+
+---
+
 ## Frontend (post Sessione 4)
 
 | Item | Quando | Note |
@@ -92,15 +119,27 @@ Per il diario operativo (cosa è stato fatto, frizioni, decisioni) vedi [`JOURNA
 | **CORS middleware** (origini frontend) | Sessione 4 (quando il dashboard farà fetch al backend) |
 | **GDPR data export / deletion** endpoint | Sessione 11+ |
 
-## Brand Brain / AI (Sessione 9-10)
+## Brand Brain / AI
+
+### Done
+
+| Item | Quando | Note |
+|---|---|---|
+| ✅ ~~Setup `pgvector` extension su Supabase~~ | ~~Sessione 7~~ **DONE** | `CREATE EXTENSION IF NOT EXISTS vector;` in migration 0004. |
+| ✅ ~~Tabella `brand_chunks` con embedding vector(1536) + HNSW index~~ | ~~Sessione 7~~ **DONE** | Migrations 0004 + 0005, `vector_cosine_ops`, `m=16, ef_construction=64`. Vedi [ADR-0008 §2](./infrastructure/docs/architecture/decisions/0008-brand-brain-foundation.md). |
+| ✅ ~~`EmbedderProtocol` + `LLMProtocol` adapter pattern~~ | ~~Sessione 7~~ **DONE** | `app/core/ai/`. PEP 544 Protocol + factory lazy. Concrete: OpenAI text-embedding-3-small + Anthropic Claude Sonnet 4.6. |
+| ✅ ~~7 endpoint `/api/v1/clients/{id}/brand/*`~~ | ~~Sessione 7~~ **DONE** | PUT form, POST upload (PDF), POST text, GET assets, DELETE asset, GET history, POST query. |
+| ✅ ~~Frontend page `/brand-brain` (Tab Genera live)~~ | ~~Sessione 7~~ **DONE** (Tab Assets/Storico → S7-bis) | Server Component + Client Tabs (shadcn base-nova). GenerateTab con Server Action, output + MetaCard + retrieved_chunks `<details>`. |
+
+### Future (Sessione 8+)
 
 | Item | Note |
 |---|---|
-| Setup `pgvector` extension su Supabase | `CREATE EXTENSION IF NOT EXISTS vector;` |
-| Tabella `brand_documents` con embedding vector(1536) + HNSW index | Sessione 9 |
-| `BrandBrain` service: `embed_text`, `index_document`, `search_similar` | Sessione 9 |
-| Caption Agent con few-shot dal Brand Brain | Sessione 10 |
-| Tabella `ai_invocations` per cost tracking | Sessione 10 |
+| **Caption Agent** con few-shot dal Brand Brain | Sessione 8-9 |
+| **Tabella `ai_invocations`** per cost tracking unificato (embed + LLM separati) | Sessione 9-10. Per ora `brand_generations` traccia solo LLM. |
+| **Multi-LLM routing cost-aware** (Sonnet vs Haiku) | Sessione 9+. Adapter già pronto, manca il selector. |
+| **A/B test embeddings**: OpenAI vs BGE-large-en self-hosted | Sessione 10+ se quality issue emergono o privacy esterni richiesti. |
+| **Fine-tuning custom su `brand_generations` history** | Sessione 12+. Append-only è già design-ready. |
 
 ---
 
