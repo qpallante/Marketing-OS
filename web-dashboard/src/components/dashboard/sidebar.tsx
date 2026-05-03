@@ -18,6 +18,7 @@ interface NavSection {
 
 const MAIN_NAV: readonly NavItem[] = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/brand-brain", label: "Brand Brain" },
   { href: "/content", label: "Contenuti" },
   { href: "/analytics", label: "Analytics" },
   { href: "/settings", label: "Impostazioni" },

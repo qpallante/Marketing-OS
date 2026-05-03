@@ -40,7 +40,14 @@ import { NextResponse, type NextRequest } from "next/server";
  * `(dashboard)/admin/layout.tsx` (redirect a /dashboard per non-super_admin),
  * ma per anonimi senza cookie il proxy intercetta prima del rendering.
  */
-const PROTECTED_PREFIXES = ["/dashboard", "/content", "/analytics", "/settings", "/admin"];
+const PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/brand-brain",
+  "/content",
+  "/analytics",
+  "/settings",
+  "/admin",
+];
 
 function isProtected(pathname: string): boolean {
   return PROTECTED_PREFIXES.some(

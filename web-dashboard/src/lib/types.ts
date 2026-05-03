@@ -95,6 +95,48 @@ export interface InvitationPreviewResponse {
   expires_at: string; // ISO 8601
 }
 
+// ─── Brand Brain (S7) ───────────────────────────────────────────────────────
+
+/**
+ * Metadata di un chunk usato nel retrieval RAG. Esposto al frontend per audit
+ * ("perché Claude ha generato questo testo?") e debug.
+ *
+ * Backend NON include `chunk_text` per response size (vedi
+ * `core-api/app/schemas/brand.py` `RetrievedChunkInfo`). Per il preview del
+ * testo serve futuro endpoint `GET /assets/{id}/chunks/{idx}` (out-of-scope S7).
+ *
+ * `similarity`: cosine similarity 0..1 (più alto = più rilevante). NON
+ * `distance` (1 - similarity).
+ */
+export interface RetrievedChunkInfo {
+  asset_id: string;
+  asset_filename: string;
+  chunk_index: number;
+  similarity: number;
+}
+
+/**
+ * Response 200 OK di `POST /api/v1/clients/{id}/brand/query`.
+ *
+ * Field naming match esatto col backend (`core-api/app/schemas/brand.py`
+ * `BrandQueryResponse`):
+ *  - `output_text` (non `text`)
+ *  - `model_used` (non `model`)
+ *  - **niente** `embedding_tokens` (non separato dai `tokens_input` LLM in S7)
+ *
+ * `latency_ms`: end-to-end LLM call. NON include embed + retrieval + DB writes.
+ */
+export interface BrandQueryResponse {
+  generation_id: string;
+  output_text: string;
+  retrieved_chunks: RetrievedChunkInfo[];
+  form_data_used: boolean;
+  tokens_input: number;
+  tokens_output: number;
+  latency_ms: number;
+  model_used: string;
+}
+
 // ─── Error envelope ──────────────────────────────────────────────────────────
 
 /**
